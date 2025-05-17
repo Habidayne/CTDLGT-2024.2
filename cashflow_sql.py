@@ -1,18 +1,322 @@
 import tkinter as tk
+import math
 from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import mysql.connector  
 import time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import networkx as nx
+#import networkx as nx
 from tkcalendar import DateEntry
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+
+def format_money(amount):
+    """Format Decimal amount to string with 2 decimal places"""
+    return str(Decimal(amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+class Graph:
+    def __init__(self):
+        self.nodes = DynamicArray()  # Danh sách các đỉnh
+        self.edges = DynamicArray()  # Danh sách các cạnh
+    
+    def add_node(self, node):
+        """Thêm một đỉnh vào đồ thị"""
+        if node not in self.nodes:
+            self.nodes.append(node)
+    
+    def add_edge(self, source, target, weight):
+        """Thêm một cạnh có trọng số vào đồ thị"""
+        self.edges.append((source, target, weight))
+    
+    # Cập nhật phương thức spring_layout trong class Graph
+    def spring_layout(self, k=None, iterations=100, seed=None):
+        """
+        Cải tiến thuật toán Spring Layout cho việc sắp xếp các đỉnh
+        k: Độ dài lý tưởng của cạnh
+        iterations: Số vòng lặp tối ưu
+        seed: Giá trị khởi tạo cho random
+        """
+        import random
+        if seed:
+            random.seed(seed)
+            
+        # Khởi tạo các tham số
+        if k is None:
+            k = 1.0 / (self.nodes.size ** 0.5)  # Tự động điều chỉnh k theo số đỉnh
+            
+        # Khởi tạo vị trí ngẫu nhiên trong hình tròn
+        pos = {}
+        for i, node in enumerate(self.nodes):
+            angle = 2 * 3.14159 * i / self.nodes.size
+            pos[node] = [0.5 + 0.4 * math.cos(angle), 0.5 + 0.4 * math.sin(angle)]
+        
+        # Tham số thuật toán
+        t = 1.0  # Temperature
+        dt = t / (iterations + 1)
+        area = 1.0
+        cooling_factor = 0.95
+        
+        # Lặp để tối ưu vị trí
+        for _ in range(iterations):
+            # Tính lực đẩy giữa các đỉnh
+            disp = {node: [0, 0] for node in self.nodes}
+            
+            # Lực đẩy Coulomb giữa các đỉnh
+            for i in range(self.nodes.size):
+                for j in range(i + 1, self.nodes.size):
+                    delta_x = pos[self.nodes[j]][0] - pos[self.nodes[i]][0]
+                    delta_y = pos[self.nodes[j]][1] - pos[self.nodes[i]][1]
+                    dist = max(0.01, (delta_x * delta_x + delta_y * delta_y) ** 0.5)
+                    
+                    # Cải tiến công thức tính lực đẩy
+                    force = k * k / dist ** 2
+                    dx = delta_x * force / dist
+                    dy = delta_y * force / dist
+                    
+                    disp[self.nodes[i]][0] -= dx
+                    disp[self.nodes[i]][1] -= dy
+                    disp[self.nodes[j]][0] += dx
+                    disp[self.nodes[j]][1] += dy
+            
+            # Lực kéo Hooke của các cạnh
+            for source, target, weight in self.edges:
+                delta_x = pos[target][0] - pos[source][0]
+                delta_y = pos[target][1] - pos[source][1]
+                dist = max(0.01, (delta_x * delta_x + delta_y * delta_y) ** 0.5)
+                
+                # Cải tiến công thức tính lực kéo
+                force = dist ** 2 / k * math.log(dist/k)
+                dx = delta_x * force / dist
+                dy = delta_y * force / dist
+                
+                disp[source][0] += dx
+                disp[source][1] += dy
+                disp[target][0] -= dx
+                disp[target][1] -= dy
+            
+            # Cập nhật vị trí với giới hạn nhiệt độ
+            for node in self.nodes:
+                dx = disp[node][0]
+                dy = disp[node][1]
+                dist = max(0.01, (dx * dx + dy * dy) ** 0.5)
+                
+                # Giới hạn độ dịch chuyển bằng nhiệt độ
+                pos[node][0] += dx * min(dist, t) / dist
+                pos[node][1] += dy * min(dist, t) / dist
+                
+                # Giữ các đỉnh trong khung 0.1-0.9
+                pos[node][0] = min(0.9, max(0.1, pos[node][0]))
+                pos[node][1] = min(0.9, max(0.1, pos[node][1]))
+            
+            # Làm mát hệ thống
+            t *= cooling_factor
+        
+        return pos
+    
+
+class Sort:
+    @staticmethod
+    def quick_sort(mảng, key=None, reverse=False):
+        """
+        Sắp xếp mảng sử dụng thuật toán Quick Sort
+        :param mảng: DynamicArray cần sắp xếp
+        :param key: Hàm để lấy giá trị so sánh
+        :param reverse: True để sắp xếp giảm dần, False để sắp xếp tăng dần
+        """
+        def partition(start, end):
+            pivot = mảng[end]
+            pivot_value = key(pivot) if key else pivot
+            i = start - 1
+            
+            for j in range(start, end):
+                current_value = key(mảng[j]) if key else mảng[j]
+                if (not reverse and current_value <= pivot_value) or \
+                   (reverse and current_value >= pivot_value):
+                    i += 1
+                    mảng[i], mảng[j] = mảng[j], mảng[i]
+            
+            mảng[i + 1], mảng[end] = mảng[end], mảng[i + 1]
+            return i + 1
+
+        def quick_sort_helper(start, end):
+            if start < end:
+                pi = partition(start, end)
+                quick_sort_helper(start, pi - 1)
+                quick_sort_helper(pi + 1, end)
+
+        quick_sort_helper(0, mảng.size - 1)
+        return mảng
+
+    @staticmethod
+    def merge_sort(mảng, key=None, reverse=False):
+        """
+        Sắp xếp mảng sử dụng thuật toán Merge Sort
+        :param mảng: DynamicArray cần sắp xếp
+        :param key: Hàm để lấy giá trị so sánh
+        :param reverse: True để sắp xếp giảm dần, False để sắp xếp tăng dần
+        """
+        if mảng.size <= 1:
+            return mảng
+
+        mid = mảng.size // 2
+        left = DynamicArray()
+        right = DynamicArray()
+
+        for i in range(mid):
+            left.append(mảng[i])
+        for i in range(mid, mảng.size):
+            right.append(mảng[i])
+
+        Sort.merge_sort(left, key, reverse)
+        Sort.merge_sort(right, key, reverse)
+
+        i = j = k = 0
+
+        while i < left.size and j < right.size:
+            left_value = key(left[i]) if key else left[i]
+            right_value = key(right[j]) if key else right[j]
+
+            if (not reverse and left_value <= right_value) or \
+               (reverse and left_value >= right_value):
+                mảng[k] = left[i]
+                i += 1
+            else:
+                mảng[k] = right[j]
+                j += 1
+            k += 1
+
+        while i < left.size:
+            mảng[k] = left[i]
+            i += 1
+            k += 1
+
+        while j < right.size:
+            mảng[k] = right[j]
+            j += 1
+            k += 1
+
+        return mảng
+
+class DynamicArray:
+    def __init__(self, initial_capacity=4):  
+        self.size = 0
+        self.capacity = initial_capacity
+        self.array = self._create_array(self.capacity)
+    
+    def _create_array(self, capacity):
+        """Tạo mảng mới với kích thước cho trước"""
+        return [None] * capacity
+    
+    def __len__(self):
+        """Trả về số phần tử trong mảng"""
+        return self.size
+    
+    def __getitem__(self, index):
+        """Truy cập phần tử tại vị trí index"""
+        if not 0 <= index < self.size:
+            raise IndexError('Invalid index')
+        return self.array[index]
+    
+    def __setitem__(self, index, value):
+        """Gán giá trị cho phần tử tại vị trí index"""
+        if not 0 <= index < self.size:
+            raise IndexError('Invalid index')
+        self.array[index] = value
+    
+    def append(self, element):
+        """Thêm phần tử vào cuối mảng"""
+        if self.size == self.capacity:
+            # Nếu mảng đầy, tăng gấp đôi dung lượng
+            self._resize(2 * self.capacity)
+        
+        self.array[self.size] = element
+        self.size += 1
+    
+    def _resize(self, new_capacity):
+        """Thay đổi kích thước mảng"""
+        new_array = self._create_array(new_capacity)
+        
+        # Sao chép dữ liệu sang mảng mới
+        for i in range(self.size):
+            new_array[i] = self.array[i]
+        
+        self.array = new_array
+        self.capacity = new_capacity
+    
+    def __str__(self):
+        """Chuyển mảng thành chuỗi để in"""
+        return str([self.array[i] for i in range(self.size)])
+
+    def insert(self, index, element):
+        """Chèn phần tử tại vị trí index"""
+        if not 0 <= index <= self.size:
+            raise IndexError('Invalid index')
+            
+        if self.size == self.capacity:
+            self._resize(2 * self.capacity)
+            
+        # Dời các phần tử để tạo chỗ trống
+        for i in range(self.size, index, -1):
+            self.array[i] = self.array[i-1]
+            
+        self.array[index] = element
+        self.size += 1
+    
+    def remove(self, element):
+        """
+        Xóa phần tử đầu tiên có giá trị bằng element
+        :param element: Phần tử cần xóa
+        :raises ValueError: Nếu không tìm thấy phần tử
+        """
+        found = False
+        for i in range(self.size):
+            if self.array[i] == element:
+                # Dời các phần tử về trước
+                for j in range(i, self.size - 1):
+                    self.array[j] = self.array[j+1]
+                # Đặt phần tử cuối thành None
+                self.array[self.size - 1] = None
+                self.size -= 1
+                found = True
+                break
+
+        if not found:
+            raise ValueError('Element not found')
+
+        # Có thể thêm logic thu nhỏ capacity nếu size quá nhỏ
+        # if self.size < self.capacity // 4:
+        #     self._resize(self.capacity // 2)
+
+    def __contains__(self, item):
+        """
+        Kiểm tra xem một phần tử có tồn tại trong mảng không
+        :param item: Phần tử cần kiểm tra
+        :return: True nếu tồn tại, False nếu không
+        """
+        for i in range(self.size):
+            if self.array[i] == item:
+                return True
+        return False
+
+    def index(self, item):
+        """
+        Tìm vị trí đầu tiên của một phần tử trong mảng
+        :param item: Phần tử cần tìm
+        :return: Chỉ số của phần tử trong mảng
+        :raises ValueError: Nếu không tìm thấy phần tử
+        """
+        for i in range(self.size):
+            if self.array[i] == item:
+                return i
+        raise ValueError(f'Value {item} not found in array')
+    
+    
+        
 
 class Đồ_Thị:
 
     def __init__(self, conn=None, cursor=None):
-        self.danh_sách_đỉnh = []
-        self.ma_trận_kề = []
+        self.danh_sách_đỉnh = DynamicArray()  # thay vì []
+        self.ma_trận_kề = DynamicArray()      # thay vì []
         self.số_đỉnh = 0
         self.conn = conn
         self.cursor = cursor
@@ -33,45 +337,74 @@ class Đồ_Thị:
             """)
             
             # Reset ma trận kề
-            self.ma_trận_kề = [[0] * self.số_đỉnh for _ in range(self.số_đỉnh)]
+            self.ma_trận_kề = DynamicArray()
+            for i in range(self.số_đỉnh):
+                row = DynamicArray()
+                for j in range(self.số_đỉnh):
+                    row.append(Decimal('0.00'))
+                self.ma_trận_kề.append(row)
             
             # Cập nhật ma trận kề
             for người_nợ, người_cho_vay, số_tiền, đã_trả in self.cursor.fetchall():
                 if người_nợ in self.danh_sách_đỉnh and người_cho_vay in self.danh_sách_đỉnh:
                     i = self.danh_sách_đỉnh.index(người_nợ)
                     j = self.danh_sách_đỉnh.index(người_cho_vay)
-                    số_tiền_còn_lại = float(số_tiền) - float(đã_trả)
-                    if số_tiền_còn_lại > 0:
+                    số_tiền_còn_lại = Decimal(str(số_tiền)) - Decimal(str(đã_trả))
+                    if số_tiền_còn_lại > Decimal('0'):
                         self.ma_trận_kề[i][j] = số_tiền_còn_lại
                         
         except mysql.connector.Error as err:
             print(f"Lỗi đồng bộ dữ liệu: {err}")
     
     def thêm_đỉnh(self, tên):
-        if tên in self.danh_sách_đỉnh:
+        # Kiểm tra tên có trong danh_sách_đỉnh
+        if tên in self.danh_sách_đỉnh:  # Sử dụng __contains__
             return False
+                
+        # Thêm đỉnh mới
         self.danh_sách_đỉnh.append(tên)
         self.số_đỉnh += 1
+        
+        # Khởi tạo ma trận kề
         if self.số_đỉnh == 1:
-            self.ma_trận_kề = [[0]]
+            new_row = DynamicArray()
+            new_row.append(Decimal('0.00'))
+            self.ma_trận_kề.append(new_row)
         else:
+            # Thêm cột 0 vào các hàng hiện có
             for i in range(self.số_đỉnh - 1):
-                self.ma_trận_kề[i].append(0)
-            self.ma_trận_kề.append([0] * self.số_đỉnh)
+                row = self.ma_trận_kề[i]
+                row.append(Decimal('0.00'))
+            
+            # Thêm hàng mới
+            new_row = DynamicArray()
+            for i in range(self.số_đỉnh):
+                new_row.append(Decimal('0.00'))
+            self.ma_trận_kề.append(new_row)
+            
         return True
     
     def thêm_cạnh(self, nguồn, đích, giá_trị, lưu_vào_db=True):
-        if nguồn not in self.danh_sách_đỉnh or đích not in self.danh_sách_đỉnh:
+        # Tìm chỉ mục của nguồn và đích
+        try:
+            chỉ_mục_nguồn = self.danh_sách_đỉnh.index(nguồn)  # Sử dụng index
+            chỉ_mục_đích = self.danh_sách_đỉnh.index(đích)    # Sử dụng index
+        except ValueError:
             return False
-        chỉ_mục_nguồn = self.danh_sách_đỉnh.index(nguồn)
-        chỉ_mục_đích = self.danh_sách_đỉnh.index(đích)
-        self.ma_trận_kề[chỉ_mục_nguồn][chỉ_mục_đích] += giá_trị
-    
-        # Chỉ lưu vào MySQL khi cần thiết
+                
+        if chỉ_mục_nguồn == -1 or chỉ_mục_đích == -1:
+            return False
+            
+        # Chuyển đổi giá_trị thành Decimal và cộng dồn
+        giá_trị_decimal = Decimal(str(giá_trị))
+        current_val = self.ma_trận_kề[chỉ_mục_nguồn][chỉ_mục_đích]
+        self.ma_trận_kề[chỉ_mục_nguồn][chỉ_mục_đích] = current_val + giá_trị_decimal
+        
+        # Lưu vào database nếu cần
         if lưu_vào_db:
             self.cursor.execute(
                 "INSERT INTO debts (from_person, to_person, amount) VALUES (%s, %s, %s)",
-                (nguồn, đích, giá_trị)
+                (nguồn, đích, str(giá_trị_decimal))
             )
             self.conn.commit()
         return True
@@ -80,18 +413,21 @@ class Đồ_Thị:
         return self.ma_trận_kề
     
     def tính_số_dư_ròng(self):
-        số_dư = [0] * self.số_đỉnh
+        số_dư = DynamicArray()
+        for i in range(self.số_đỉnh):
+            số_dư.append(Decimal('0.00'))
+            
         for i in range(self.số_đỉnh):
             for j in range(self.số_đỉnh):
-                số_dư[i] -= self.ma_trận_kề[i][j]
-                số_dư[i] += self.ma_trận_kề[j][i]
+                số_dư[i] -= Decimal(str(self.ma_trận_kề[i][j]))
+                số_dư[i] += Decimal(str(self.ma_trận_kề[j][i]))
         return số_dư
     
     def tính_tổng_nợ(self):
-        tổng = 0
+        tổng = Decimal('0.00')
         for i in range(self.số_đỉnh):
             for j in range(self.số_đỉnh):
-                tổng += self.ma_trận_kề[i][j]
+                tổng += Decimal(str(self.ma_trận_kề[i][j]))
         return tổng
     
     def lấy_danh_sách_nợ(self):
@@ -112,15 +448,19 @@ class Đồ_Thị:
         for nợ in khoản_nợ:
             nợ_id, người_nợ, người_cho_vay, số_tiền_gốc, ngày_giao_dịch, ngày_đến_hạn, lãi_suất, phí_phạt = nợ
             
+            số_tiền_gốc = Decimal(str(số_tiền_gốc))
+            lãi_suất = Decimal(str(lãi_suất or '0'))
+            phí_phạt = Decimal(str(phí_phạt or '0'))
+
             # Tính số ngày từ ngày giao dịch
             ngày_giao_dịch_obj = time.strptime(str(ngày_giao_dịch), "%Y-%m-%d %H:%M:%S")
             ngày_giao_dịch_date = time.strftime("%Y-%m-%d", ngày_giao_dịch_obj)
             ngày_giao_dịch_datetime = time.strptime(ngày_giao_dịch_date, "%Y-%m-%d")
             ngày_hiện_tại_datetime = time.strptime(hôm_nay, "%Y-%m-%d")
-            số_ngày = (time.mktime(ngày_hiện_tại_datetime) - time.mktime(ngày_giao_dịch_datetime)) / (24 * 3600)
+            số_ngày = Decimal(str(time.mktime(ngày_hiện_tại_datetime) - time.mktime(ngày_giao_dịch_datetime)) / (24 * 3600))
             
             # Tính lãi
-            lãi_hàng_ngày = số_tiền_gốc * (lãi_suất / 100) / 365
+            lãi_hàng_ngày = số_tiền_gốc * (lãi_suất / Decimal('100')) / Decimal('365')
             tiền_lãi = lãi_hàng_ngày * số_ngày
             
             # Tính phí phạt nếu quá hạn
@@ -128,8 +468,8 @@ class Đồ_Thị:
             if ngày_đến_hạn:
                 ngày_đến_hạn_datetime = time.strptime(str(ngày_đến_hạn), "%Y-%m-%d")
                 if ngày_hiện_tại_datetime > ngày_đến_hạn_datetime:
-                    số_ngày_quá_hạn = (time.mktime(ngày_hiện_tại_datetime) - time.mktime(ngày_đến_hạn_datetime)) / (24 * 3600)
-                    tiền_phạt = số_tiền_gốc * (phí_phạt / 100) * số_ngày_quá_hạn / 30  # Phí phạt hàng tháng
+                    số_ngày_quá_hạn = Decimal(str(time.mktime(ngày_hiện_tại_datetime) - time.mktime(ngày_đến_hạn_datetime)) / (24 * 3600))
+                    tiền_phạt = (số_tiền_gốc * phí_phạt * số_ngày_quá_hạn) / (Decimal('100') * Decimal('30'))
             
             # Tổng số tiền hiện tại
             tổng_tiền = số_tiền_gốc + tiền_lãi + tiền_phạt
@@ -148,45 +488,54 @@ class Tối_Ưu_Hóa_Dòng_Tiền:
         self.đồ_thị = đồ_thị
     
     def tối_ưu_hóa(self):
-        số_dư = self.đồ_thị.tính_số_dư_ròng()
-        danh_sách_người_dùng = self.đồ_thị.danh_sách_đỉnh
-        chỉ_mục_số_dư = [(i, số_dư[i]) for i in range(len(số_dư))]
+        số_dư = DynamicArray()  # Thay vì list
+        for i in range(self.đồ_thị.số_đỉnh):
+            số_dư.append(Decimal('0.00'))
         
-        người_nhận = [(i, val) for i, val in chỉ_mục_số_dư if val > 0]
-        người_trả = [(i, val) for i, val in chỉ_mục_số_dư if val < 0]
+        # Tính số dư
+        for i in range(self.đồ_thị.số_đỉnh):
+            for j in range(self.đồ_thị.số_đỉnh):
+                số_dư[i] -= Decimal(str(self.đồ_thị.ma_trận_kề[i][j]))
+                số_dư[i] += Decimal(str(self.đồ_thị.ma_trận_kề[j][i]))
+
+        người_nhận = DynamicArray()
+        người_trả = DynamicArray()
         
-        người_nhận.sort(key=lambda x: x[1], reverse=True)
-        người_trả.sort(key=lambda x: x[1])
-        
-        giao_dịch_tối_ưu = []
+        # Phân loại người nhận/trả
+        for i in range(len(số_dư)):
+            if số_dư[i] > Decimal('0.00'):
+                người_nhận.append((i, số_dư[i]))
+            elif số_dư[i] < Decimal('0.00'):
+                người_trả.append((i, số_dư[i]))
+
+        # Sắp xếp (cần thay thế bằng thuật toán sort tự cài đặt)
+        Sort.quick_sort(người_nhận, key=lambda x: x[1], reverse=True)
+        Sort.quick_sort(người_trả, key=lambda x: x[1])
+
+        giao_dịch_tối_ưu = DynamicArray()
         i, j = 0, 0
         
-        while i < len(người_trả) and j < len(người_nhận):
+        while i < người_trả.size and j < người_nhận.size:
             người_trả_idx, số_tiền_trả = người_trả[i]
             người_nhận_idx, số_tiền_nhận = người_nhận[j]
-            số_tiền_giao_dịch = min(abs(số_tiền_trả), số_tiền_nhận)
+            số_tiền_giao_dịch = min(abs(Decimal(str(số_tiền_trả))), Decimal(str(số_tiền_nhận)))
+            
             giao_dịch_tối_ưu.append((
-                danh_sách_người_dùng[người_trả_idx],
-                danh_sách_người_dùng[người_nhận_idx],
+                self.đồ_thị.danh_sách_đỉnh[người_trả_idx],
+                self.đồ_thị.danh_sách_đỉnh[người_nhận_idx],
                 số_tiền_giao_dịch
             ))
+            
             số_tiền_trả += số_tiền_giao_dịch
             số_tiền_nhận -= số_tiền_giao_dịch
+            
             người_trả[i] = (người_trả_idx, số_tiền_trả)
             người_nhận[j] = (người_nhận_idx, số_tiền_nhận)
-            if abs(số_tiền_trả) < 1e-6:
+            
+            if abs(số_tiền_trả) < Decimal('1e-6'):  # Thay vì < 1e-6
                 i += 1
-            if số_tiền_nhận < 1e-6:
+            if số_tiền_nhận < Decimal('1e-6'):  # Thay vì < 1e-6
                 j += 1
-        
-        # Lưu giao dịch tối ưu vào MySQL
-        self.đồ_thị.cursor.execute("DELETE FROM transactions")
-        for from_p, to_p, amount in giao_dịch_tối_ưu:
-            self.đồ_thị.cursor.execute(
-                "INSERT INTO transactions (from_person, to_person, amount) VALUES (%s, %s, %s)",
-                (from_p, to_p, amount)
-            )
-        self.đồ_thị.conn.commit()
         
         return giao_dịch_tối_ưu
     
@@ -194,15 +543,27 @@ class Tối_Ưu_Hóa_Dòng_Tiền:
         danh_sách_nợ_ban_đầu = self.đồ_thị.lấy_danh_sách_nợ()
         số_giao_dịch_ban_đầu = len(danh_sách_nợ_ban_đầu)
         số_giao_dịch_tối_ưu = len(giao_dịch_tối_ưu)
-        tổng_giá_trị_ban_đầu = sum(nợ[2] for nợ in danh_sách_nợ_ban_đầu)
-        tổng_giá_trị_tối_ưu = sum(gd[2] for gd in giao_dịch_tối_ưu)
+
+        # Tính tổng giá trị ban đầu và tối ưu
+        tổng_giá_trị_ban_đầu = Decimal('0.00')
+        for nợ in danh_sách_nợ_ban_đầu:
+            tổng_giá_trị_ban_đầu += Decimal(str(nợ[2]))
+
+        tổng_giá_trị_tối_ưu = Decimal('0.00')
+        for i in range(giao_dịch_tối_ưu.size):
+            tổng_giá_trị_tối_ưu += Decimal(str(giao_dịch_tối_ưu[i][2]))
+
+        giảm_số_giao_dịch = số_giao_dịch_ban_đầu - số_giao_dịch_tối_ưu
+        tỷ_lệ_giảm = (Decimal(str(giảm_số_giao_dịch)) / 
+                      Decimal(str(max(1, số_giao_dịch_ban_đầu)))) * Decimal('100')
+
         return {
             'số_giao_dịch_ban_đầu': số_giao_dịch_ban_đầu,
             'số_giao_dịch_tối_ưu': số_giao_dịch_tối_ưu,
             'tổng_giá_trị_ban_đầu': tổng_giá_trị_ban_đầu,
             'tổng_giá_trị_tối_ưu': tổng_giá_trị_tối_ưu,
-            'giảm_số_giao_dịch': số_giao_dịch_ban_đầu - số_giao_dịch_tối_ưu,
-            'tỷ_lệ_giảm': (số_giao_dịch_ban_đầu - số_giao_dịch_tối_ưu) / max(1, số_giao_dịch_ban_đầu) * 100
+            'giảm_số_giao_dịch': giảm_số_giao_dịch,
+            'tỷ_lệ_giảm': tỷ_lệ_giảm
         }
 
 class Giao_Diện_Người_Dùng:
@@ -212,25 +573,6 @@ class Giao_Diện_Người_Dùng:
         self.root.title("Trình tối ưu hóa dòng tiền")
         self.root.geometry("1200x800")
         self.root.configure(bg="#f0f0f0")
-
-        # Hỏi người dùng có muốn kết nối SQL không
-        if messagebox.askyesno("Kết nối SQL", "Bạn có muốn kết nối với cơ sở dữ liệu MySQL không?"):
-            # Login SQL nếu người dùng chọn Yes
-            login = SQL_Login()
-            login.wait_window()
-            
-            if login.result:
-                self.conn, self.cursor = login.result
-            else:
-                # Nếu không kết nối được, vẫn tiếp tục với None
-                self.conn = None
-                self.cursor = None
-        else:
-            # Nếu người dùng chọn No, khởi tạo None
-            self.conn = None
-            self.cursor = None
-
-        self.đồ_thị = Đồ_Thị(self.conn, self.cursor)
 
         # Tạo tabs
         self.tab_control = ttk.Notebook(root)
@@ -245,21 +587,48 @@ class Giao_Diện_Người_Dùng:
         self.tab_control.add(self.tab_đồ_thị, text="Biểu diễn đồ thị")
         self.tab_control.add(self.tab_tình_trạng, text="Tình trạng nợ")
         self.tab_control.pack(expand=1, fill="both")
+
+        self.nút_tải_dữ_liệu = ttk.Button(
+            self.tab_nhập_liệu, 
+            text="Tải dữ liệu từ SQL", 
+            command=self._tải_dữ_liệu_từ_mysql
+        )
+        self.nút_tải_dữ_liệu.pack(pady=10)
+
+        # Hỏi người dùng có muốn kết nối SQL không
+        if messagebox.askyesno("Kết nối SQL", "Bạn có muốn kết nối với cơ sở dữ liệu MySQL không?"):
+            # Login SQL nếu người dùng chọn Yes
+            login = SQL_Login()
+            login.wait_window()
+            
+            if login.result:
+                self.conn, self.cursor = login.result
+                self.nút_tải_dữ_liệu["state"] = "normal"  # Enable nút
+            else:
+                # Nếu không kết nối được, disable nút
+                self.conn = None
+                self.cursor = None
+                self.nút_tải_dữ_liệu["state"] = "disabled"
+        else:
+            # Nếu người dùng chọn No, disable nút
+            self.conn = None
+            self.cursor = None
+            self.nút_tải_dữ_liệu["state"] = "disabled"
+
+        self.đồ_thị = Đồ_Thị(self.conn, self.cursor)
         
         self._xây_dựng_tab_nhập_liệu()
         self._xây_dựng_tab_kết_quả()
         self._xây_dựng_tab_đồ_thị()
         self._xây_dựng_tab_tình_trạng()
+
+        
         
         # Chỉ tải dữ liệu từ MySQL nếu có kết nối
         if self.conn and self.cursor:
             self._tải_dữ_liệu_từ_mysql()
             self._kiểm_tra_thông_báo()
 
-        # Chỉ hiện nút tải dữ liệu nếu có kết nối SQL
-        if self.conn and self.cursor:
-            self.nút_tải_dữ_liệu = ttk.Button(self.tab_nhập_liệu, text="Tải dữ liệu từ SQL", command=self._tải_dữ_liệu_từ_mysql)
-            self.nút_tải_dữ_liệu.pack(pady=10)
 
     def _xây_dựng_tab_nhập_liệu(self):
         # Tạo Canvas và Scrollbar
@@ -453,39 +822,219 @@ class Giao_Diện_Người_Dùng:
             messagebox.showerror("Lỗi", f"Không thể thêm người dùng: {str(e)}")
 
     def _xây_dựng_tab_tình_trạng(self):
+        # Frame chính
         frame_tình_trạng = ttk.LabelFrame(self.tab_tình_trạng, text="Tình trạng các khoản nợ")
         frame_tình_trạng.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Frame chứa các nút điều khiển
+        frame_buttons = ttk.Frame(frame_tình_trạng)
+        frame_buttons.pack(fill='x', padx=5, pady=5)
         
-        btn_cập_nhật = ttk.Button(frame_tình_trạng, text="Cập nhật tình trạng nợ", command=self._cập_nhật_tình_trạng_nợ)
-        btn_cập_nhật.pack(pady=10)
+        # Các nút điều khiển
+        btn_cập_nhật = ttk.Button(
+            frame_buttons, 
+            text="Cập nhật tình trạng nợ",
+            command=self._cập_nhật_tình_trạng_nợ
+        )
+        btn_cập_nhật.pack(side='left', padx=5)
         
-        btn_thanh_toán = ttk.Button(frame_tình_trạng, text="Thanh toán", command=self._ghi_nhận_thanh_toán)
-        btn_thanh_toán.pack(pady=10)
-        
-        self.tree_tình_trạng = ttk.Treeview(frame_tình_trạng, columns=(
-            "người_nợ", "người_cho_vay", "số_tiền_gốc", "ngày_giao_dịch", "ngày_đến_hạn", 
-            "lãi_suất", "phí_phạt", "số_ngày_quá_hạn", "tổng_phí_phạt", "tổng_tiền"
-        ), show="headings")
-        self.tree_tình_trạng.heading("người_nợ", text="Người nợ", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "người_nợ", False))
-        self.tree_tình_trạng.heading("người_cho_vay", text="Người cho vay", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "người_cho_vay", False))
-        self.tree_tình_trạng.heading("số_tiền_gốc", text="Số tiền gốc", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "số_tiền_gốc", True))
-        self.tree_tình_trạng.heading("ngày_giao_dịch", text="Ngày giao dịch", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "ngày_giao_dịch", False))
-        self.tree_tình_trạng.heading("ngày_đến_hạn", text="Ngày đến hạn", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "ngày_đến_hạn", False))
-        self.tree_tình_trạng.heading("lãi_suất", text="Lãi suất", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "lãi_suất", True))
-        self.tree_tình_trạng.heading("phí_phạt", text="Phí phạt", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "phí_phạt", True))
-        self.tree_tình_trạng.heading("số_ngày_quá_hạn", text="Số ngày quá hạn", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "số_ngày_quá_hạn", True))
-        self.tree_tình_trạng.heading("tổng_phí_phạt", text="Tổng phí phạt", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "tổng_phí_phạt", True))
-        self.tree_tình_trạng.heading("tổng_tiền", text="Tổng tiền", command=lambda: self._sắp_xếp_treeview(self.tree_tình_trạng, "tổng_tiền", True))
-        self.tree_tình_trạng.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        # Biến để theo dõi trạng thái sắp xếp
+        btn_thanh_toán = ttk.Button(
+            frame_buttons, 
+            text="Thanh toán",
+            command=self._ghi_nhận_thanh_toán
+        )
+        btn_thanh_toán.pack(side='left', padx=5)
+
+        # Frame cho bảng với scrollbars
+        frame_table = ttk.Frame(frame_tình_trạng)
+        frame_table.pack(fill='both', expand=True, padx=5, pady=5)
+
+        # Tạo và cấu hình scrollbars
+        vsb = ttk.Scrollbar(frame_table, orient="vertical")
+        hsb = ttk.Scrollbar(frame_table, orient="horizontal")
+
+        # Định nghĩa các cột với thuộc tính chi tiết
+        column_defs = {
+            "người_nợ": {
+                "heading": "Người nợ",
+                "width": 120,
+                "anchor": "w",
+                "stretch": False,
+                "is_numeric": False
+            },
+            "người_cho_vay": {
+                "heading": "Người cho vay", 
+                "width": 120,
+                "anchor": "w",
+                "stretch": False,
+                "is_numeric": False
+            },
+            "số_tiền_gốc": {
+                "heading": "Số tiền gốc",
+                "width": 150,
+                "anchor": "e",
+                "stretch": False,
+                "is_numeric": True
+            },
+            "ngày_giao_dịch": {
+                "heading": "Ngày giao dịch",
+                "width": 120,
+                "anchor": "center",
+                "stretch": False,
+                "is_numeric": False
+            },
+            "ngày_đến_hạn": {
+                "heading": "Ngày đến hạn",
+                "width": 120,
+                "anchor": "center",
+                "stretch": False,
+                "is_numeric": False
+            },
+            "lãi_suất": {
+                "heading": "Lãi suất (%)",
+                "width": 100,
+                "anchor": "e",
+                "stretch": False,
+                "is_numeric": True
+            },
+            "phí_phạt": {
+                "heading": "Phí phạt (%)",
+                "width": 100,
+                "anchor": "e",
+                "stretch": False,
+                "is_numeric": True
+            },
+            "số_ngày_quá_hạn": {
+                "heading": "Số ngày quá hạn",
+                "width": 120,
+                "anchor": "e",
+                "stretch": False,
+                "is_numeric": True
+            },
+            "tổng_phí_phạt": {
+                "heading": "Tổng phí phạt",
+                "width": 150,
+                "anchor": "e",
+                "stretch": False,
+                "is_numeric": True
+            },
+            "tổng_tiền": {
+                "heading": "Tổng tiền",
+                "width": 150,
+                "anchor": "e",
+                "stretch": False,
+                "is_numeric": True
+            }
+        }
+
+        # Tạo Treeview với các cột đã định nghĩa
+        self.tree_tình_trạng = ttk.Treeview(
+            frame_table,
+            columns=tuple(column_defs.keys()),
+            show="headings",
+            yscrollcommand=vsb.set,
+            xscrollcommand=hsb.set
+        )
+
+        # Thiết lập scrollbars
+        vsb.config(command=self.tree_tình_trạng.yview)
+        hsb.config(command=self.tree_tình_trạng.xview)
+
+        # Grid layout cho tree và scrollbars
+        self.tree_tình_trạng.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+
+        # Cấu hình grid weights
+        frame_table.grid_rowconfigure(0, weight=1)
+        frame_table.grid_columnconfigure(0, weight=1)
+
+        # Cấu hình các cột
+        for col, props in column_defs.items():
+            self.tree_tình_trạng.heading(
+                col,
+                text=props["heading"],
+                command=lambda c=col, n=props["is_numeric"]: 
+                    self._sắp_xếp_treeview(self.tree_tình_trạng, c, n)
+            )
+            self.tree_tình_trạng.column(
+                col,
+                width=props["width"],
+                minwidth=props["width"]-20,
+                anchor=props["anchor"],
+                stretch=props["stretch"]
+            )
+
+        # Style cho alternating rows
+        style = ttk.Style()
+        style.configure(
+            "Treeview",
+            background="white",
+            foreground="black",
+            fieldbackground="white"
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", "#0078D7")],
+            foreground=[("selected", "white")]
+        )
+
+        # Biến theo dõi trạng thái sắp xếp
         self.sort_states = {}
+
+        # Binding cho việc chọn dòng
+        self.tree_tình_trạng.bind('<<TreeviewSelect>>', self._on_tình_trạng_select)
+
+        # Tạo context menu
+        self.context_menu = tk.Menu(self.tree_tình_trạng, tearoff=0)
+        self.context_menu.add_command(
+            label="Thanh toán",
+            command=self._ghi_nhận_thanh_toán
+        )
+        self.context_menu.add_separator()
+        self.context_menu.add_command(
+            label="Cập nhật",
+            command=self._cập_nhật_tình_trạng_nợ
+        )
+
+        # Binding cho right-click
+        self.tree_tình_trạng.bind(
+            "<Button-3>",
+            lambda e: self._show_context_menu(e)
+        )
+
+    def _show_context_menu(self, event):
+        """Hiển thị context menu khi right-click"""
+        if self.tree_tình_trạng.selection():  # Chỉ hiển thị khi có dòng được chọn
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+
+    def _on_tình_trạng_select(self, event):
+        """Xử lý sự kiện khi chọn một dòng trong bảng tình trạng"""
+        selection = self.tree_tình_trạng.selection()
+        if selection:
+            # Enable nút thanh toán nếu có dòng được chọn
+            for child in self.tree_tình_trạng.get_children():
+                if child in selection:
+                    values = self.tree_tình_trạng.item(child)['values']
+                    # Có thể thêm logic xử lý khi chọn dòng ở đây
 
     def _sắp_xếp_treeview(self, tree, col, is_numeric=False):
         from datetime import datetime
         
-        # Lấy tất cả các mục từ tree
-        items = [(tree.set(item, col), item) for item in tree.get_children('')]
+        # Định nghĩa hàm chuyển đổi ngày rõ ràng
+        def convert_date(date_str):
+            if not date_str or date_str.strip() == '':
+                return datetime.min
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            except (ValueError, AttributeError):
+                print(f"Lỗi chuyển đổi ngày: '{date_str}'")
+                return datetime.min
+        
+        # Lấy tất cả các mục từ tree và chuyển vào DynamicArray
+        items = DynamicArray()
+        for item in tree.get_children(''):
+            items.append((tree.set(item, col), item))
         
         # Khởi tạo trạng thái sắp xếp nếu chưa có
         if col not in self.sort_states:
@@ -494,31 +1043,25 @@ class Giao_Diện_Người_Dùng:
         # Đảo ngược trạng thái sắp xếp hiện tại
         self.sort_states[col] = not self.sort_states[col]
         
-        # Định nghĩa hàm chuyển đổi ngày rõ ràng
-        def convert_date(date_str):
-            if not date_str or date_str.strip() == '':
-                return datetime.min
-            try:
-                # Chuyển đổi chuỗi yyyy-mm-dd thành đối tượng datetime
-                return datetime.strptime(date_str, "%Y-%m-%d")
-            except (ValueError, AttributeError):
-                print(f"Lỗi chuyển đổi ngày: '{date_str}'")
-                return datetime.min
-        
-        # Sắp xếp các mục dựa trên loại dữ liệu và hướng sắp xếp
+        # Xác định key function dựa trên loại dữ liệu
         if col in ["ngày_giao_dịch", "ngày_đến_hạn"]:
-            # Sắp xếp theo ngày
-            items.sort(key=lambda x: convert_date(x[0]), reverse=self.sort_states[col])
+            Sort.quick_sort(items, 
+                        key=lambda x: convert_date(x[0]), 
+                        reverse=self.sort_states[col])
         elif is_numeric:
-            # Chuyển đổi sang số để sắp xếp đúng
-            items.sort(key=lambda x: float(x[0].replace(',', '').replace('%', '')) if x[0] and x[0].strip() else 0, 
-                    reverse=self.sort_states[col])
+            Sort.quick_sort(items, 
+                key=lambda x: (Decimal(str(x[0]).replace(',', '').replace('%', '')) 
+                            if x[0] and x[0].strip() 
+                            else Decimal('-Infinity')),
+                reverse=self.sort_states[col])
         else:
-            # Sắp xếp theo chuỗi
-            items.sort(key=lambda x: x[0].lower() if x[0] else "", reverse=self.sort_states[col])
+            Sort.quick_sort(items, 
+                        key=lambda x: x[0].lower() if x[0] else "", 
+                        reverse=self.sort_states[col])
         
         # Xóa các mục hiện tại và thêm lại theo thứ tự đã sắp xếp
-        for index, (val, id) in enumerate(items):
+        for index in range(items.size):
+            val, id = items[index]
             tree.move(id, '', index)
         
         # Lưu trữ tiêu đề gốc khi khởi tạo
@@ -527,9 +1070,8 @@ class Giao_Diện_Người_Dùng:
             for c in tree['columns']:
                 self.original_headings[c] = tree.heading(c)['text']
         
-        # Cập nhật tiêu đề để hiển thị hướng sắp xếp, giữ nguyên tên đầy đủ
+        # Cập nhật tiêu đề để hiển thị hướng sắp xếp
         original_text = self.original_headings[col]
-        # Loại bỏ mũi tên cũ nếu có
         if " ↓" in original_text:
             original_text = original_text.replace(" ↓", "")
         if " ↑" in original_text:
@@ -538,7 +1080,7 @@ class Giao_Diện_Người_Dùng:
         arrow = " ↓" if self.sort_states[col] else " ↑"
         tree.heading(col, text=original_text + arrow)
         
-        # Đặt lại tiêu đề của các cột khác (giữ nguyên tên đầy đủ)
+        # Đặt lại tiêu đề của các cột khác
         for c in tree['columns']:
             if c != col:
                 original_text = self.original_headings[c]
@@ -547,95 +1089,154 @@ class Giao_Diện_Người_Dùng:
                 if " ↑" in original_text:
                     original_text = original_text.replace(" ↑", "")
                 tree.heading(c, text=original_text)
+
+    def _tính_tiền_lãi(self, số_tiền_gốc, lãi_suất, ngày_bắt_đầu, ngày_kết_thúc):
+        """Tính tiền lãi dựa trên số tiền gốc và thời gian"""
+        if not ngày_bắt_đầu:
+            return Decimal('0')
         
+        ngày_bắt_đầu_str = str(ngày_bắt_đầu).split()[0]
+        ngày_bắt_đầu_datetime = time.strptime(ngày_bắt_đầu_str, "%Y-%m-%d")
+        số_ngày = Decimal(str((time.mktime(ngày_kết_thúc) - time.mktime(ngày_bắt_đầu_datetime)) / (24 * 3600)))
+        
+        tiền_lãi = (số_tiền_gốc * 
+                (Decimal(str(lãi_suất or '0')) / Decimal('100')) * 
+                số_ngày) / Decimal('365')
+        
+        return tiền_lãi
+
+    def _tính_phí_phạt(self, số_tiền_gốc, phí_phạt, ngày_đến_hạn, ngày_kết_thúc):
+        """Tính phí phạt nếu quá hạn"""
+        if not ngày_đến_hạn or not phí_phạt:
+            return Decimal('0'), 0
+            
+        ngày_đến_hạn_datetime = time.strptime(str(ngày_đến_hạn), "%Y-%m-%d")
+        
+        # Chỉ tính phí phạt nếu đã quá hạn
+        if ngày_kết_thúc <= ngày_đến_hạn_datetime:
+            return Decimal('0'), 0
+            
+        số_ngày_quá_hạn = int((time.mktime(ngày_kết_thúc) - 
+                            time.mktime(ngày_đến_hạn_datetime)) / (24 * 3600))
+        
+        tiền_phạt = (số_tiền_gốc * 
+                    Decimal(str(phí_phạt)) / Decimal('100') * 
+                    Decimal(str(số_ngày_quá_hạn))) / Decimal('30')
+                    
+        return tiền_phạt, số_ngày_quá_hạn
+
     def _cập_nhật_tình_trạng_nợ(self):
         try:
             # Xóa dữ liệu cũ
             for item in self.tree_tình_trạng.get_children():
                 self.tree_tình_trạng.delete(item)
-                
-            # Nếu không có người dùng, thoát
-            if not self.đồ_thị.danh_sách_đỉnh:
+
+            # Kiểm tra kết nối database
+            if not self.conn or not self.cursor:
+                messagebox.showerror("Lỗi", "Không có kết nối cơ sở dữ liệu!")
                 return
-                
+                    
+            # Lấy ngày hiện tại
             hôm_nay = time.strftime("%Y-%m-%d")
             hôm_nay_datetime = time.strptime(hôm_nay, "%Y-%m-%d")
+
+            # Query để lấy chi tiết từng khoản nợ và số tiền đã trả
+            self.cursor.execute("""
+                SELECT 
+                    d.id,
+                    d.from_person,
+                    d.to_person,
+                    d.amount,
+                    d.transaction_date,
+                    d.due_date,
+                    d.interest_rate,
+                    d.late_fee_rate,
+                    COALESCE(SUM(p.amount), 0) as paid_amount
+                FROM debts d
+                LEFT JOIN payments p ON d.id = p.debt_id
+                GROUP BY 
+                    d.id, 
+                    d.from_person, 
+                    d.to_person, 
+                    d.amount,
+                    d.transaction_date, 
+                    d.due_date, 
+                    d.interest_rate, 
+                    d.late_fee_rate
+                HAVING (d.amount - COALESCE(SUM(p.amount), 0)) > 0
+                ORDER BY d.due_date ASC, d.from_person, d.to_person
+            """)
             
-            # Chỉ hiển thị các khoản nợ từ ma trận kề
-            for i in range(self.đồ_thị.số_đỉnh):
-                for j in range(self.đồ_thị.số_đỉnh):
-                    số_tiền_gốc = self.đồ_thị.ma_trận_kề[i][j]
-                    if số_tiền_gốc > 0.01:  # Chỉ xử lý các khoản nợ còn lại
-                        người_nợ = self.đồ_thị.danh_sách_đỉnh[i]
-                        người_cho_vay = self.đồ_thị.danh_sách_đỉnh[j]
-                        
-                        # Lấy thông tin từ database
-                        self.cursor.execute("""
-                            SELECT transaction_date, due_date, interest_rate, late_fee_rate
-                            FROM debts 
-                            WHERE from_person = %s AND to_person = %s
-                            ORDER BY transaction_date DESC LIMIT 1
-                        """, (người_nợ, người_cho_vay))
-                        
-                        result = self.cursor.fetchone()
-                        if result:
-                            ngày_gd, ngày_đến_hạn, lãi_suất, phí_phạt = result
-                        else:
-                            ngày_gd = time.strftime("%Y-%m-%d")
-                            ngày_đến_hạn = None
-                            lãi_suất = 0
-                            phí_phạt = 0
-                        
-                        # Tính tiền lãi
-                        tiền_lãi = 0
-                        if ngày_gd:
-                            ngày_gd_obj = time.strptime(str(ngày_gd), "%Y-%m-%d %H:%M:%S")
-                            ngày_gd_date = time.strftime("%Y-%m-%d", ngày_gd_obj)
-                            ngày_gd_datetime = time.strptime(ngày_gd_date, "%Y-%m-%d")
-                            số_ngày = (time.mktime(hôm_nay_datetime) - time.mktime(ngày_gd_datetime)) / (24 * 3600)
-                            tiền_lãi = (số_tiền_gốc * (float(lãi_suất) / 100) * số_ngày) / 365
-                        
-                        # Tính phí phạt
-                        tiền_phạt = 0
-                        số_ngày_quá_hạn = 0
-                        if ngày_đến_hạn:
-                            ngày_đến_hạn_datetime = time.strptime(str(ngày_đến_hạn), "%Y-%m-%d")
-                            if hôm_nay_datetime > ngày_đến_hạn_datetime:
-                                số_ngày_quá_hạn = (time.mktime(hôm_nay_datetime) - time.mktime(ngày_đến_hạn_datetime)) / (24 * 3600)
-                                tiền_phạt = số_tiền_gốc * (float(phí_phạt) / 100) * số_ngày_quá_hạn / 30
-                        
-                        # Tổng tiền
-                        tổng_tiền = số_tiền_gốc + tiền_lãi + tiền_phạt
-                        
-                        # Thêm vào treeview
-                        self.tree_tình_trạng.insert("", "end", values=(
-                            người_nợ,
-                            người_cho_vay,
-                            f"{số_tiền_gốc:.2f}",  # Hiển thị số tiền gốc
-                            ngày_gd,
-                            ngày_đến_hạn or "Không có",
-                            f"{lãi_suất}%",
-                            f"{phí_phạt}%",
-                            int(số_ngày_quá_hạn),
-                            f"{tiền_phạt:.2f}",
-                            f"{tổng_tiền:.2f}"  # Hiển thị tổng tiền bao gồm lãi và phạt
-                        ))
-                        
+            khoản_nợ = self.cursor.fetchall()
+            
+            if not khoản_nợ:
+                messagebox.showinfo("Thông báo", "Không có khoản nợ nào!")
+                return
+
+            for (debt_id, người_nợ, người_cho_vay, số_tiền, ngày_gd, 
+                ngày_đến_hạn, lãi_suất, phí_phạt, đã_trả) in khoản_nợ:
+                
+                # Tính số tiền gốc còn lại cho khoản nợ cụ thể này
+                số_tiền_gốc = Decimal(str(số_tiền)) - Decimal(str(đã_trả))
+                
+                if số_tiền_gốc <= Decimal('0'):
+                    continue
+
+                # Tính lãi cho khoản nợ này
+                tiền_lãi = self._tính_tiền_lãi(
+                    số_tiền_gốc=số_tiền_gốc,
+                    lãi_suất=lãi_suất,
+                    ngày_bắt_đầu=ngày_gd,
+                    ngày_kết_thúc=hôm_nay_datetime
+                )
+
+                # Tính phí phạt cho khoản nợ này
+                tiền_phạt, số_ngày_quá_hạn = self._tính_phí_phạt(
+                    số_tiền_gốc=số_tiền_gốc,
+                    phí_phạt=phí_phạt,
+                    ngày_đến_hạn=ngày_đến_hạn,
+                    ngày_kết_thúc=hôm_nay_datetime
+                )
+
+                # Tính tổng tiền phải trả cho khoản nợ này
+                tổng_tiền = số_tiền_gốc + tiền_lãi + tiền_phạt
+
+                # Thêm vào treeview với đầy đủ thông tin
+                self.tree_tình_trạng.insert("", "end", 
+                    values=(
+                        người_nợ,
+                        người_cho_vay,
+                        format_money(số_tiền_gốc),
+                        ngày_gd.strftime("%Y-%m-%d") if ngày_gd else "N/A",
+                        ngày_đến_hạn.strftime("%Y-%m-%d") if ngày_đến_hạn else "Không có",
+                        f"{float(lãi_suất or 0):.1f}%",
+                        f"{float(phí_phạt or 0):.1f}%",
+                        số_ngày_quá_hạn,
+                        format_money(tiền_phạt),
+                        format_money(tổng_tiền)
+                    ),
+                    tags=(str(debt_id),)  # Lưu debt_id trong tags để dùng khi thanh toán
+                )
+
+            messagebox.showinfo("Thành công", "Đã cập nhật tình trạng nợ!")
+                
         except mysql.connector.Error as err:
-            messagebox.showerror("Lỗi", f"Không thể cập nhật tình trạng nợ: {err}")
+            messagebox.showerror("Lỗi", f"Lỗi cập nhật: {err}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi không xác định: {str(e)}")
 
     def _thêm_khoản_nợ(self):
         người_nợ = self.combo_người_nợ.get()
         người_cho_vay = self.combo_người_cho_vay.get()
         try:
-            số_tiền = float(self.entry_số_tiền.get())
-            if số_tiền <= 0:
+            số_tiền = Decimal(self.entry_số_tiền.get())
+            if số_tiền <= Decimal('0'):
                 raise ValueError("Số tiền phải lớn hơn 0")
                     
             # Parse new fields
             ngày_đến_hạn = self.date_due.get()
-            lãi_suất = float(self.entry_lãi_suất.get() or 0.0)
-            phí_phạt = float(self.entry_phí_phạt.get() or 0.0)
+            lãi_suất = Decimal(self.entry_lãi_suất.get() or 0.0)
+            phí_phạt = Decimal(self.entry_phí_phạt.get() or 0.0)
             
             # Kiểm tra lãi suất <= 20%
             if lãi_suất > 20:
@@ -675,7 +1276,14 @@ class Giao_Diện_Người_Dùng:
         self.đồ_thị.thêm_cạnh(người_nợ, người_cho_vay, số_tiền, lưu_vào_db=False)
             
         # Update the tree view with new loan information
-        self.tree_nợ.insert("", "end", values=(người_nợ, người_cho_vay, số_tiền, ngày_đến_hạn, f"{lãi_suất}%", f"{phí_phạt}%"))
+        self.tree_nợ.insert("", "end", values=(
+            người_nợ, 
+            người_cho_vay, 
+            format_money(số_tiền),
+            ngày_đến_hạn, 
+            f"{lãi_suất}%", 
+            f"{phí_phạt}%"
+        ))
             
         # Clear entry fields
         self.entry_số_tiền.delete(0, tk.END)
@@ -689,10 +1297,13 @@ class Giao_Diện_Người_Dùng:
             
         messagebox.showinfo("Thành công", f"Đã thêm khoản nợ: {người_nợ} nợ {người_cho_vay} {số_tiền}")
 
+
     def _cập_nhật_combobox(self):
-        danh_sách = self.đồ_thị.danh_sách_đỉnh
-        self.combo_người_nợ['values'] = danh_sách
-        self.combo_người_cho_vay['values'] = danh_sách
+        danh_sách = DynamicArray()
+        for i in range(self.đồ_thị.danh_sách_đỉnh.size):
+            danh_sách.append(self.đồ_thị.danh_sách_đỉnh[i])
+        self.combo_người_nợ['values'] = tuple(danh_sách)  # Chuyển về tuple cho combobox
+        self.combo_người_cho_vay['values'] = tuple(danh_sách)
 
 
     def _tối_ưu_hóa_dòng_tiền(self):
@@ -713,15 +1324,15 @@ class Giao_Diện_Người_Dùng:
             return
 
         # Tính toán tổng số tiền (gốc + lãi + phạt) cho mỗi khoản nợ
-        danh_sách_nợ = []
+        danh_sách_nợ = DynamicArray()
         hôm_nay = time.strftime("%Y-%m-%d")
         hôm_nay_datetime = time.strptime(hôm_nay, "%Y-%m-%d")
         
         for người_nợ, người_cho_vay, số_tiền_gốc, ngày_giao_dịch, ngày_đến_hạn, lãi_suất, phí_phạt in danh_sách_nợ_gốc:
             # Chuyển đổi các giá trị Decimal thành float
-            số_tiền_gốc = float(số_tiền_gốc)
-            lãi_suất = float(lãi_suất) if lãi_suất else 0.0
-            phí_phạt = float(phí_phạt) if phí_phạt else 0.0
+            số_tiền_gốc = Decimal(str(số_tiền_gốc))
+            lãi_suất = Decimal(str(lãi_suất)) if lãi_suất else Decimal('0')
+            phí_phạt = Decimal(str(phí_phạt)) if phí_phạt else Decimal('0')
             
             tổng_tiền = số_tiền_gốc
 
@@ -733,7 +1344,10 @@ class Giao_Diện_Người_Dùng:
                 ngày_giao_dịch_str = str(ngày_giao_dịch).split()[0]
                 ngày_giao_dịch_datetime = time.strptime(ngày_giao_dịch_str, "%Y-%m-%d")
                 số_ngày = max(0, (time.mktime(hôm_nay_datetime) - time.mktime(ngày_giao_dịch_datetime)) / (24 * 3600))
-                tiền_lãi = (số_tiền_gốc * (lãi_suất / 100) * số_ngày) / 365
+                tiền_lãi = (số_tiền_gốc * 
+                    (lãi_suất / Decimal('100')) * 
+                    Decimal(str(số_ngày)) / 
+                    Decimal('365'))
                 tổng_tiền += tiền_lãi
             
             # Tính phí phạt nếu quá hạn
@@ -745,7 +1359,7 @@ class Giao_Diện_Người_Dùng:
                 
                 if chênh_lệch < 0:  # Quá hạn
                     số_ngày_quá_hạn = abs(int(chênh_lệch))
-                    tiền_phạt = (số_tiền_gốc * (phí_phạt / 100) * số_ngày_quá_hạn) / 30
+                    tiền_phạt = self._tính_tiền_phạt(số_tiền_gốc, phí_phạt, số_ngày_quá_hạn)
                     tổng_tiền += tiền_phạt
             
             # Thêm khoản nợ với tổng số tiền đã tính vào danh sách
@@ -776,7 +1390,11 @@ class Giao_Diện_Người_Dùng:
             self.tree_giao_dịch.delete(item)
         for gd in giao_dịch_tối_ưu:
             người_trả, người_nhận, số_tiền = gd
-            self.tree_giao_dịch.insert("", "end", values=(người_trả, người_nhận, f"{số_tiền:.2f}"))
+            self.tree_giao_dịch.insert("", "end", values=(
+    người_trả, 
+    người_nhận, 
+    format_money(Decimal(str(số_tiền)))
+))
         self.text_thống_kê.delete(1.0, tk.END)
         self.text_thống_kê.insert(tk.END, f"Thời gian thực thi: {thời_gian:.2f} ms\n\n")
         self.text_thống_kê.insert(tk.END, f"Số giao dịch ban đầu: {đánh_giá['số_giao_dịch_ban_đầu']}\n")
@@ -786,6 +1404,7 @@ class Giao_Diện_Người_Dùng:
         self.text_thống_kê.insert(tk.END, f"Tổng giá trị giao dịch sau tối ưu: {đánh_giá['tổng_giá_trị_tối_ưu']:.2f}\n")
         self.text_thống_kê.insert(tk.END, f"Lưu ý: Giá trị đã bao gồm tiền gốc, lãi và phí phạt quá hạn\n")
         self._vẽ_biểu_đồ_so_sánh(đánh_giá)
+        
 
     
 
@@ -812,96 +1431,153 @@ class Giao_Diện_Người_Dùng:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def _vẽ_đồ_thị(self, danh_sách_nợ_ban_đầu, giao_dịch_tối_ưu):
+        """
+        Vẽ hai đồ thị: đồ thị ban đầu và đồ thị sau tối ưu
+        """
+        # Xóa đồ thị cũ nếu có
         for widget in self.frame_đồ_thị_ban_đầu.winfo_children():
             widget.destroy()
         for widget in self.frame_đồ_thị_tối_ưu.winfo_children():
             widget.destroy()
+
+        # 1. Vẽ đồ thị ban đầu
+        fig1, ax1 = plt.subplots(figsize=(6, 5))
+        G_ban_đầu = Graph()
         
-        G_ban_đầu = nx.DiGraph()
-        for tên in self.đồ_thị.danh_sách_đỉnh:
-            G_ban_đầu.add_node(tên)
+        # Thêm các đỉnh và cạnh vào đồ thị ban đầu
+        for i in range(self.đồ_thị.danh_sách_đỉnh.size):
+            G_ban_đầu.add_node(self.đồ_thị.danh_sách_đỉnh[i])
         for nguồn, đích, giá_trị in danh_sách_nợ_ban_đầu:
-            G_ban_đầu.add_edge(nguồn, đích, weight=giá_trị)
+            G_ban_đầu.add_edge(nguồn, đích, giá_trị)
         
-        G_tối_ưu = nx.DiGraph()
-        for tên in self.đồ_thị.danh_sách_đỉnh:
-            G_tối_ưu.add_node(tên)
-        for nguồn, đích, giá_trị in giao_dịch_tối_ưu:
-            G_tối_ưu.add_edge(nguồn, đích, weight=giá_trị)
+        # Tính toán vị trí các đỉnh
+        pos_ban_đầu = G_ban_đầu.spring_layout(k=2, iterations=100, seed=42)
         
-        fig1, ax1 = plt.subplots(figsize=(5, 4))
-        pos = nx.spring_layout(G_ban_đầu, seed=42)
-        nx.draw_networkx_nodes(G_ban_đầu, pos, node_color='lightblue', node_size=500, ax=ax1)
-        edge_labels = {(u, v): f"{d['weight']:.1f}" for u, v, d in G_ban_đầu.edges(data=True)}
-        nx.draw_networkx_edges(G_ban_đầu, pos, width=1.5, alpha=0.7, edge_color='gray', ax=ax1)
-        nx.draw_networkx_edge_labels(G_ban_đầu, pos, edge_labels=edge_labels, font_size=8, ax=ax1)
-        nx.draw_networkx_labels(G_ban_đầu, pos, font_size=10, font_weight='bold', ax=ax1)
-        ax1.set_title("Đồ thị dòng tiền ban đầu")
+        # Vẽ các đỉnh
+        for node in G_ban_đầu.nodes:
+            x, y = pos_ban_đầu[node]
+            circle = plt.Circle((x, y), 0.03, color='lightblue', zorder=2)
+            ax1.add_artist(circle)
+            ax1.text(x, y, node, 
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    fontsize=10,
+                    fontweight='bold',
+                    bbox=dict(facecolor='white', edgecolor='none', alpha=0.7))
+        
+        # Vẽ các cạnh có hướng và nhãn
+        for source, target, weight in G_ban_đầu.edges:
+            x1, y1 = pos_ban_đầu[source]
+            x2, y2 = pos_ban_đầu[target]
+            
+            # Tạo cạnh cong
+            rad = 0.2
+            ax1.annotate("",
+                xy=(x2, y2), xycoords='data',
+                xytext=(x1, y1), textcoords='data',
+                arrowprops=dict(
+                    arrowstyle="->",
+                    connectionstyle=f"arc3,rad={rad}",
+                    color='gray',
+                    alpha=0.6,
+                    linewidth=1.5
+                )
+            )
+            
+            # Thêm nhãn trên cạnh
+            middle_x = (x1 + x2) / 2 - (y2 - y1) * rad
+            middle_y = (y1 + y2) / 2 + (x2 - x1) * rad
+            ax1.text(middle_x, middle_y, 
+                format_money(Decimal(str(weight))),
+                horizontalalignment='center',
+                verticalalignment='center',
+                bbox=dict(facecolor='white', edgecolor='none', alpha=0.7))
+        
+        ax1.set_title("Đồ thị dòng tiền ban đầu", pad=20, fontsize=12, fontweight='bold')
         ax1.axis('off')
+        ax1.set_xlim(-0.1, 1.1)
+        ax1.set_ylim(-0.1, 1.1)
         plt.tight_layout()
+        
+        # Hiển thị đồ thị ban đầu
         canvas1 = FigureCanvasTkAgg(fig1, master=self.frame_đồ_thị_ban_đầu)
         canvas1.draw()
         canvas1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # 2. Vẽ đồ thị tối ưu
+        fig2, ax2 = plt.subplots(figsize=(6, 5))
+        G_tối_ưu = Graph()
         
-        fig2, ax2 = plt.subplots(figsize=(5, 4))
-        nx.draw_networkx_nodes(G_tối_ưu, pos, node_color='lightgreen', node_size=500, ax=ax2)
-        edge_labels = {(u, v): f"{d['weight']:.1f}" for u, v, d in G_tối_ưu.edges(data=True)}
-        nx.draw_networkx_edges(G_tối_ưu, pos, width=1.5, alpha=0.7, edge_color='red', ax=ax2)
-        nx.draw_networkx_edge_labels(G_tối_ưu, pos, edge_labels=edge_labels, font_size=8, ax=ax2)
-        nx.draw_networkx_labels(G_tối_ưu, pos, font_size=10, font_weight='bold', ax=ax2)
-        ax2.set_title("Đồ thị dòng tiền tối ưu")
+        # Thêm các đỉnh và cạnh vào đồ thị tối ưu
+        for i in range(self.đồ_thị.danh_sách_đỉnh.size):
+            G_tối_ưu.add_node(self.đồ_thị.danh_sách_đỉnh[i])
+        for nguồn, đích, giá_trị in giao_dịch_tối_ưu:
+            G_tối_ưu.add_edge(nguồn, đích, giá_trị)
+        
+        # Tính toán vị trí các đỉnh (sử dụng cùng seed để có layout tương tự)
+        pos_tối_ưu = G_tối_ưu.spring_layout(k=2, iterations=100, seed=42)
+        
+        # Vẽ các đỉnh
+        for node in G_tối_ưu.nodes:
+            x, y = pos_tối_ưu[node]
+            circle = plt.Circle((x, y), 0.03, color='lightgreen', zorder=2)
+            ax2.add_artist(circle)
+            ax2.text(x, y, node,
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    fontsize=10,
+                    fontweight='bold',
+                    bbox=dict(facecolor='white', edgecolor='none', alpha=0.7))
+        
+        # Vẽ các cạnh có hướng và nhãn
+        for source, target, weight in G_tối_ưu.edges:
+            x1, y1 = pos_tối_ưu[source]
+            x2, y2 = pos_tối_ưu[target]
+            
+            # Tạo cạnh cong
+            rad = 0.2
+            ax2.annotate("",
+                xy=(x2, y2), xycoords='data',
+                xytext=(x1, y1), textcoords='data',
+                arrowprops=dict(
+                    arrowstyle="->",
+                    connectionstyle=f"arc3,rad={rad}",
+                    color='red',
+                    alpha=0.6,
+                    linewidth=1.5
+                )
+            )
+            
+            # Thêm nhãn trên cạnh
+            middle_x = (x1 + x2) / 2 - (y2 - y1) * rad
+            middle_y = (y1 + y2) / 2 + (x2 - x1) * rad
+            ax2.text(middle_x, middle_y, f'{weight:.1f}',
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    bbox=dict(facecolor='white', edgecolor='none', alpha=0.7))
+        
+        ax2.set_title("Đồ thị dòng tiền tối ưu", pad=20, fontsize=12, fontweight='bold')
         ax2.axis('off')
+        ax2.set_xlim(-0.1, 1.1)
+        ax2.set_ylim(-0.1, 1.1)
         plt.tight_layout()
+        
+        # Hiển thị đồ thị tối ưu
         canvas2 = FigureCanvasTkAgg(fig2, master=self.frame_đồ_thị_tối_ưu)
         canvas2.draw()
         canvas2.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Chuyển đến tab đồ thị
         self.tab_control.select(2)
-
-    def _xóa_dữ_liệu(self):
-        if messagebox.askyesno("Xác nhận", "Bạn có chắc muốn xóa tất cả dữ liệu trên giao diện?"):
-            try:
-                # Reset đồ thị (chỉ xóa dữ liệu local)
-                self.đồ_thị.danh_sách_đỉnh = []
-                self.đồ_thị.ma_trận_kề = []
-                self.đồ_thị.số_đỉnh = 0
-                
-                # Xóa dữ liệu trên giao diện
-                for item in self.tree_người_dùng.get_children():
-                    self.tree_người_dùng.delete(item)
-                for item in self.tree_nợ.get_children():
-                    self.tree_nợ.delete(item)
-                for item in self.tree_giao_dịch.get_children():
-                    self.tree_giao_dịch.delete(item)
-                for item in self.tree_tình_trạng.get_children():
-                    self.tree_tình_trạng.delete(item)
-                
-                # Xóa thống kê
-                self.text_thống_kê.delete(1.0, tk.END)
-                
-                # Reset combobox
-                self._cập_nhật_combobox()
-                
-                # Thêm nút để tải lại dữ liệu từ SQL nếu cần
-                if self.conn and self.cursor:  # Chỉ hiện thông báo nếu có kết nối SQL
-                    if messagebox.askyesno("Tải lại dữ liệu", "Bạn có muốn tải lại dữ liệu từ MySQL không?"):
-                        self._tải_dữ_liệu_từ_mysql()
-                else:  # Nếu chưa có kết nối SQL
-                    if messagebox.askyesno("Kết nối SQL", "Bạn có muốn kết nối với cơ sở dữ liệu MySQL không?"):
-                        login = SQL_Login()
-                        login.wait_window()
-                        
-                        if login.result:
-                            self.conn, self.cursor = login.result
-                            self._tải_dữ_liệu_từ_mysql()
-                    else:
-                        messagebox.showinfo("Thành công", "Đã xóa dữ liệu trên giao diện!")
-                        
-            except Exception as err:
-                messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {err}")
     
 
     def _tạo_dữ_liệu_mẫu(self):
         if not messagebox.askyesno("Xác nhận", "Bạn có muốn tạo dữ liệu mẫu để thử nghiệm?"):
+            return
+            
+        # Kiểm tra kết nối database
+        if not self.conn or not self.cursor:
+            messagebox.showerror("Lỗi", "Không có kết nối cơ sở dữ liệu! Vui lòng kết nối MySQL trước.")
             return
         
         try:
@@ -916,12 +1592,12 @@ class Giao_Diện_Người_Dùng:
             
             # Dữ liệu khoản nợ mẫu với đầy đủ thông tin
             khoản_nợ_mẫu = [
-                ("An", "Bình", 500.00, "2025-03-20", "2025-04-05", 5.0, 1.0),  # Đã quá hạn nếu hôm nay là 31/03/2025
-                ("Bình", "Cường", 300.00, "2025-03-25", "2025-04-10", 4.5, 1.5),  # Sắp đến hạn
+                ("An", "Bình", 500.00, "2025-03-20", "2025-04-05", 5.0, 1.0),
+                ("Bình", "Cường", 300.00, "2025-03-25", "2025-04-10", 4.5, 1.5),
                 ("Cường", "Dung", 400.00, "2025-03-28", "2025-04-15", 5.5, 1.0),
                 ("Dung", "An", 200.00, "2025-03-29", "2025-04-20", 3.5, 0.5),
                 ("An", "Hùng", 600.00, "2025-03-30", "2025-04-25", 6.0, 2.0),
-                ("Hùng", "Bình", 100.00, "2025-03-27", "2025-04-07", 4.0, 1.0),  # Sắp đến hạn
+                ("Hùng", "Bình", 100.00, "2025-03-27", "2025-04-07", 4.0, 1.0),
                 ("Cường", "An", 250.00, "2025-03-26", "2025-05-01", 5.0, 1.5),
             ]
             
@@ -944,6 +1620,8 @@ class Giao_Diện_Người_Dùng:
         
         except mysql.connector.Error as err:
             messagebox.showerror("Lỗi", f"Không thể tạo dữ liệu mẫu: {err}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi không xác định: {str(e)}")
 
     def _kiểm_tra_thông_báo(self):
         """Hiển thị thông báo về các khoản nợ sắp đến hạn và các khoản nợ đã quá hạn"""
@@ -1001,8 +1679,8 @@ class Giao_Diện_Người_Dùng:
     def _tải_dữ_liệu_từ_mysql(self):
         try:
             # Xóa dữ liệu hiện tại
-            self.đồ_thị.danh_sách_đỉnh = []
-            self.đồ_thị.ma_trận_kề = []
+            self.đồ_thị.danh_sách_đỉnh = DynamicArray()
+            self.đồ_thị.ma_trận_kề = DynamicArray()
             self.đồ_thị.số_đỉnh = 0
             
             # Xóa dữ liệu trên giao diện
@@ -1034,8 +1712,8 @@ class Giao_Diện_Người_Dùng:
             
             khoản_nợ = self.cursor.fetchall()
             for (id, người_nợ, người_cho_vay, số_tiền, ngày_gd, ngày_đến_hạn, lãi_suất, phí_phạt, đã_trả) in khoản_nợ:
-                số_tiền_còn_lại = float(số_tiền) - float(đã_trả)
-                if số_tiền_còn_lại > 0:
+                số_tiền_còn_lại = Decimal(str(số_tiền)) - Decimal(str(đã_trả))
+                if số_tiền_còn_lại > Decimal('0'):  # Thay vì > 0
                     self.đồ_thị.thêm_cạnh(người_nợ, người_cho_vay, số_tiền_còn_lại, lưu_vào_db=False)
                     self.tree_nợ.insert("", "end", values=(
                         người_nợ, người_cho_vay, f"{số_tiền_còn_lại:.2f}",
@@ -1060,19 +1738,29 @@ class Giao_Diện_Người_Dùng:
         values = self.tree_tình_trạng.item(selected_item, 'values')
         người_nợ = values[0]
         người_cho_vay = values[1]
-        số_tiền_gốc = Decimal(values[2])  # Tổng số tiền gốc từ giao diện
-        tổng_tiền = Decimal(values[9])    # Tổng tiền (gốc + lãi + phạt) từ giao diện
+        số_tiền_gốc = Decimal(str(values[2]).replace(",", ""))
+        tổng_tiền = Decimal(str(values[9]).replace(",", ""))
 
-        số_tiền_thanh_toán = simpledialog.askfloat(
-            "Thanh toán",
-            f"Nhập số tiền thanh toán (tối đa {float(tổng_tiền):.2f}):",
-            minvalue=0.01,
-            maxvalue=float(tổng_tiền)
-        )
-        
-        if số_tiền_thanh_toán is None:
+
+        try:
+            số_tiền_thanh_toán_str = simpledialog.askstring(
+                "Thanh toán", 
+                f"Nhập số tiền thanh toán (tối đa {format_money(tổng_tiền)}):"
+            )
+            if số_tiền_thanh_toán_str is None:
+                return
+            
+            số_tiền_thanh_toán = Decimal(số_tiền_thanh_toán_str)
+            if số_tiền_thanh_toán <= Decimal('0'):
+                raise ValueError("Số tiền phải lớn hơn 0")
+            if số_tiền_thanh_toán > tổng_tiền:
+                raise ValueError(f"Số tiền không được vượt quá {format_money(tổng_tiền)}")
+
+
+        except (ValueError, InvalidOperation) as e:
+            messagebox.showerror("Lỗi", f"Số tiền không hợp lệ: {str(e)}")
             return
-
+    
         try:
             # Đồng bộ dữ liệu trước khi truy vấn
             self.đồ_thị.đồng_bộ_dữ_liệu()
@@ -1098,41 +1786,46 @@ class Giao_Diện_Người_Dùng:
             # Tính tổng số tiền thực tế từ tất cả các khoản nợ
             hôm_nay = time.strftime("%Y-%m-%d")
             hôm_nay_datetime = time.strptime(hôm_nay, "%Y-%m-%d")
-            tổng_số_tiền_thực_tế = 0
+            tổng_số_tiền_thực_tế = Decimal('0')
             danh_sách_tiền_nợ = []
 
             for debt_id, amount, paid, ngày_giao_dịch, ngày_đến_hạn, lãi_suất, phí_phạt in danh_sách_nợ:
-                số_tiền_gốc_còn_lại = float(amount) - float(paid or 0)
+                số_tiền_gốc_còn_lại = Decimal(amount) - (Decimal(paid) if paid else Decimal('0'))
 
                 # Tính lãi
-                tiền_lãi = 0
+                tiền_lãi = Decimal('0')
                 if ngày_giao_dịch:
                     ngày_gd_str = str(ngày_giao_dịch).split()[0]
                     ngày_gd_datetime = time.strptime(ngày_gd_str, "%Y-%m-%d")
-                    số_ngày = max(0, (time.mktime(hôm_nay_datetime) - time.mktime(ngày_gd_datetime)) / (24 * 3600))
-                    tiền_lãi = (số_tiền_gốc_còn_lại * (float(lãi_suất or 0) / 100) * số_ngày) / 365
+                    số_ngày = Decimal(str((time.mktime(hôm_nay_datetime) - time.mktime(ngày_gd_datetime)) / (24 * 3600)))
+                    tiền_lãi = (số_tiền_gốc_còn_lại * 
+                       Decimal(str(lãi_suất)) / Decimal('100') * 
+                       số_ngày) / Decimal('365')
 
                 # Tính phí phạt
-                tiền_phạt = 0
+                tiền_phạt = Decimal('0')
                 if ngày_đến_hạn:
                     ngày_đến_hạn_datetime = time.strptime(str(ngày_đến_hạn), "%Y-%m-%d")
                     if hôm_nay_datetime > ngày_đến_hạn_datetime:
-                        số_ngày_quá_hạn = (time.mktime(hôm_nay_datetime) - time.mktime(ngày_đến_hạn_datetime)) / (24 * 3600)
-                        tiền_phạt = (số_tiền_gốc_còn_lại * (float(phí_phạt or 0) / 100) * số_ngày_quá_hạn) / 30
+                        số_ngày_quá_hạn = Decimal(str((time.mktime(hôm_nay_datetime) - 
+                                             time.mktime(ngày_đến_hạn_datetime)) / (24 * 3600)))
+                        tiền_phạt = (số_tiền_gốc_còn_lại * 
+                            Decimal(str(phí_phạt or '0')) / Decimal('100') * 
+                            số_ngày_quá_hạn) / Decimal('30')
 
                 tổng_tiền_nợ = số_tiền_gốc_còn_lại + tiền_lãi + tiền_phạt
                 tổng_số_tiền_thực_tế += tổng_tiền_nợ
                 danh_sách_tiền_nợ.append((debt_id, số_tiền_gốc_còn_lại, tổng_tiền_nợ))
 
             # Kiểm tra số tiền thanh toán
-            if float(số_tiền_thanh_toán) > tổng_số_tiền_thực_tế:
+            if số_tiền_thanh_toán > tổng_số_tiền_thực_tế:
                 messagebox.showerror("Lỗi", f"Số tiền thanh toán không được vượt quá tổng số tiền thực tế ({tổng_số_tiền_thực_tế:.2f})")
                 return
 
             # Phân bổ số tiền thanh toán cho từng khoản nợ
-            số_tiền_còn_lại = float(số_tiền_thanh_toán)
+            số_tiền_còn_lại = số_tiền_thanh_toán
             for debt_id, số_tiền_gốc_còn_lại, tổng_tiền_nợ in danh_sách_tiền_nợ:
-                if số_tiền_còn_lại <= 0:
+                if số_tiền_còn_lại <= Decimal('0'):
                     break
 
                 # Số tiền thanh toán cho khoản nợ này
@@ -1143,12 +1836,12 @@ class Giao_Diện_Người_Dùng:
                 self.cursor.execute("""
                     INSERT INTO payments (debt_id, amount, payment_date) 
                     VALUES (%s, %s, NOW())
-                """, (debt_id, số_tiền_cho_khoản_nợ))
+                """, (debt_id, str(số_tiền_cho_khoản_nợ)))
 
             # Cập nhật ma trận kề
             i = self.đồ_thị.danh_sách_đỉnh.index(người_nợ)
             j = self.đồ_thị.danh_sách_đỉnh.index(người_cho_vay)
-            self.đồ_thị.ma_trận_kề[i][j] = max(0, tổng_số_tiền_thực_tế - float(số_tiền_thanh_toán))
+            self.đồ_thị.ma_trận_kề[i][j] = max(Decimal('0'), tổng_số_tiền_thực_tế - số_tiền_thanh_toán)
 
             self.conn.commit()
 
@@ -1160,11 +1853,65 @@ class Giao_Diện_Người_Dùng:
             self.conn.rollback()
             messagebox.showerror("Lỗi", f"Không thể ghi nhận thanh toán: {err}")
 
+    def _xóa_dữ_liệu(self):
+            """Xóa toàn bộ dữ liệu trong chương trình và cơ sở dữ liệu"""
+            if not messagebox.askyesno("Xác nhận", "Bạn có chắc muốn xóa tất cả dữ liệu?"):
+                return
+                
+            try:
+                # Xóa dữ liệu trong MySQL nếu có kết nối
+                if self.conn and self.cursor:
+                    # Xóa theo thứ tự để tránh lỗi khóa ngoại
+                    self.cursor.execute("DELETE FROM payments")
+                    self.cursor.execute("DELETE FROM debts")
+                    self.conn.commit()
+                
+                # Reset đồ thị
+                self.đồ_thị.danh_sách_đỉnh = DynamicArray()
+                self.đồ_thị.ma_trận_kề = DynamicArray()
+                self.đồ_thị.số_đỉnh = 0
+                
+                # Xóa dữ liệu trên giao diện
+                for item in self.tree_người_dùng.get_children():
+                    self.tree_người_dùng.delete(item)
+                for item in self.tree_nợ.get_children():
+                    self.tree_nợ.delete(item)
+                for item in self.tree_giao_dịch.get_children():
+                    self.tree_giao_dịch.delete(item)
+                for item in self.tree_tình_trạng.get_children():
+                    self.tree_tình_trạng.delete(item)
+                    
+                # Xóa nội dung text và combobox
+                self.text_thống_kê.delete(1.0, tk.END)
+                self.combo_người_nợ.set('')
+                self.combo_người_cho_vay.set('')
+                self.combo_người_nợ['values'] = []
+                self.combo_người_cho_vay['values'] = []
+                
+                # Xóa đồ thị
+                for widget in self.frame_đồ_thị_ban_đầu.winfo_children():
+                    widget.destroy()
+                for widget in self.frame_đồ_thị_tối_ưu.winfo_children():
+                    widget.destroy()
+                
+                messagebox.showinfo("Thành công", "Đã xóa tất cả dữ liệu!")
+                
+            except mysql.connector.Error as err:
+                messagebox.showerror("Lỗi", f"Không thể xóa dữ liệu: {err}")
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Lỗi không xác định: {str(e)}")
+
 class SQL_Login(tk.Toplevel):
     def __init__(self):
         super().__init__()
         self.title("Kết nối MySQL Server")
         self.geometry("400x300")
+
+        self.center_window()
+
+        # Make window modal
+        self.transient(self.master)
+        self.grab_set()
         
         # Cấu hình mặc định
         self.config = {
@@ -1172,7 +1919,7 @@ class SQL_Login(tk.Toplevel):
             'port': 3306,
             'user': 'root',
             'password': '',
-            'database': ''
+            'database': 'cashflow_db'
         }
         
         # GUI elements
@@ -1202,6 +1949,7 @@ class SQL_Login(tk.Toplevel):
         # Password
         ttk.Label(frame, text="Password:").grid(row=3, column=0, sticky='w', pady=5)
         self.pass_entry = ttk.Entry(frame, show='*')
+        self.pass_entry.insert(0, self.config['password'])  # Thêm dòng này
         self.pass_entry.grid(row=3, column=1, sticky='ew', pady=5)
         
         # Database
@@ -1219,6 +1967,29 @@ class SQL_Login(tk.Toplevel):
         
         self.result = None
         self.protocol("WM_DELETE_WINDOW", self.cancel)
+
+        # Bind Enter key to connect
+        self.bind('<Return>', lambda event: self.connect())
+        
+        # Set initial focus to password field
+        self.pass_entry.focus()
+
+    def center_window(self):
+        """Center the window on the screen"""
+        # Update window size
+        self.update_idletasks()
+        
+        # Get screen width and height
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Calculate position x, y
+        size = tuple(int(_) for _ in self.geometry().split('+')[0].split('x'))
+        x = screen_width//2 - size[0]//2
+        y = screen_height//2 - size[1]//2
+        
+        # Set the position
+        self.geometry(f"+{x}+{y}")
         
     def connect(self):
         try:
@@ -1239,7 +2010,7 @@ class SQL_Login(tk.Toplevel):
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 from_person VARCHAR(50),
                 to_person VARCHAR(50),
-                amount DECIMAL(10, 2),
+                amount DECIMAL(15, 2),  # Increased precision
                 transaction_date DATETIME DEFAULT CURRENT_TIMESTAMP,
                 due_date DATE,
                 interest_rate DECIMAL(5, 2) DEFAULT 0.0,
