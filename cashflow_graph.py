@@ -24,11 +24,6 @@ def format_money(amount):
     return str(Decimal(amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
-    
-
-
-
-
 
 
 class Đồ_Thị:
@@ -259,14 +254,23 @@ class Tối_Ưu_Hóa_Dòng_Tiền:
         return giao_dịch_tối_ưu
     
     def đánh_giá_hiệu_năng(self, giao_dịch_tối_ưu):
-        danh_sách_nợ_ban_đầu = self.đồ_thị.lấy_danh_sách_nợ()
-        số_giao_dịch_ban_đầu = len(danh_sách_nợ_ban_đầu)
-        số_giao_dịch_tối_ưu = len(giao_dịch_tối_ưu)
+        # Get initial debt list from adjacency matrix instead of MySQL
+        danh_sách_nợ_ban_đầu = DynamicArray()
+        for i in range(self.đồ_thị.số_đỉnh):
+            for j in range(self.đồ_thị.số_đỉnh):
+                if self.đồ_thị.ma_trận_kề[i][j] > Decimal('0'):
+                    nguồn = self.đồ_thị.danh_sách_đỉnh[i]
+                    đích = self.đồ_thị.danh_sách_đỉnh[j] 
+                    giá_trị = self.đồ_thị.ma_trận_kề[i][j]
+                    danh_sách_nợ_ban_đầu.append((nguồn, đích, giá_trị))
+        
+        số_giao_dịch_ban_đầu = danh_sách_nợ_ban_đầu.size
+        số_giao_dịch_tối_ưu = giao_dịch_tối_ưu.size
 
-        # Tính tổng giá trị ban đầu và tối ưu
+        # Calculate total values
         tổng_giá_trị_ban_đầu = Decimal('0.00')
-        for nợ in danh_sách_nợ_ban_đầu:
-            tổng_giá_trị_ban_đầu += Decimal(str(nợ[2]))
+        for i in range(danh_sách_nợ_ban_đầu.size):
+            tổng_giá_trị_ban_đầu += Decimal(str(danh_sách_nợ_ban_đầu[i][2]))
 
         tổng_giá_trị_tối_ưu = Decimal('0.00')
         for i in range(giao_dịch_tối_ưu.size):
@@ -274,7 +278,7 @@ class Tối_Ưu_Hóa_Dòng_Tiền:
 
         giảm_số_giao_dịch = số_giao_dịch_ban_đầu - số_giao_dịch_tối_ưu
         tỷ_lệ_giảm = (Decimal(str(giảm_số_giao_dịch)) / 
-                      Decimal(str(max(1, số_giao_dịch_ban_đầu)))) * Decimal('100')
+                    Decimal(str(max(1, số_giao_dịch_ban_đầu)))) * Decimal('100')
 
         return {
             'số_giao_dịch_ban_đầu': số_giao_dịch_ban_đầu,
@@ -293,7 +297,11 @@ class Giao_Diện_Người_Dùng:
         self.root.geometry("1200x800")
         self.root.configure(bg="#f0f0f0")
 
-        # Tạo tabs
+        # Initialize database connection attributes
+        self.conn = None 
+        self.cursor = None
+
+        # Create tabs
         self.tab_control = ttk.Notebook(root)
         self.tab_nhập_liệu = ttk.Frame(self.tab_control)
         self.tab_kết_quả = ttk.Frame(self.tab_control)
@@ -301,52 +309,46 @@ class Giao_Diện_Người_Dùng:
         self.tab_tình_trạng = ttk.Frame(self.tab_control)
         self.tab_đồ_thị = ttk.Frame(self.tab_control)
         
+        # Add tabs
         self.tab_control.add(self.tab_nhập_liệu, text="Nhập liệu")
         self.tab_control.add(self.tab_kết_quả, text="Kết quả")
         self.tab_control.add(self.tab_đồ_thị, text="Biểu diễn đồ thị")
         self.tab_control.add(self.tab_tình_trạng, text="Tình trạng nợ")
         self.tab_control.pack(expand=1, fill="both")
 
-        self.nút_tải_dữ_liệu = ttk.Button(
-            self.tab_nhập_liệu, 
-            text="Tải dữ liệu từ SQL", 
-            command=self._tải_dữ_liệu_từ_mysql
-        )
-        self.nút_tải_dữ_liệu.pack(pady=10)
-
-        # Hỏi người dùng có muốn kết nối SQL không
-        if messagebox.askyesno("Kết nối SQL", "Bạn có muốn kết nối với cơ sở dữ liệu MySQL không?"):
-            # Login SQL nếu người dùng chọn Yes
-            login = SQL_Login()
-            login.wait_window()
-            
-            if login.result:
-                self.conn, self.cursor = login.result
-                self.nút_tải_dữ_liệu["state"] = "normal"  # Enable nút
-            else:
-                # Nếu không kết nối được, disable nút
-                self.conn = None
-                self.cursor = None
-                self.nút_tải_dữ_liệu["state"] = "disabled"
-        else:
-            # Nếu người dùng chọn No, disable nút
-            self.conn = None
-            self.cursor = None
-            self.nút_tải_dữ_liệu["state"] = "disabled"
-
-        self.đồ_thị = Đồ_Thị(self.conn, self.cursor)
+        # Create frame for buttons
+        frame_buttons = ttk.Frame(self.tab_nhập_liệu)
+        frame_buttons.pack(pady=5)
         
+        # MySQL connection button - always enabled
+        self.nút_kết_nối_sql = ttk.Button(
+            frame_buttons,
+            text="Kết nối MySQL",
+            command=self._cập_nhật_kết_nối_sql
+        )
+        self.nút_kết_nối_sql.pack(side='left', padx=5)
+
+        # Load data button - disabled by default
+        self.nút_tải_dữ_liệu = ttk.Button(
+            frame_buttons, 
+            text="Tải dữ liệu từ SQL", 
+            command=self._tải_dữ_liệu_từ_mysql,
+            state="disabled"
+        )
+        self.nút_tải_dữ_liệu.pack(side='left', padx=5)
+
+        # Initialize graph
+        self.đồ_thị = Đồ_Thị(self.conn, self.cursor)
+
+        # Build tabs
         self._xây_dựng_tab_nhập_liệu()
-        self._xây_dựng_tab_kết_quả()
+        self._xây_dựng_tab_kết_quả() 
         self._xây_dựng_tab_đồ_thị()
         self._xây_dựng_tab_tình_trạng()
 
-        
-        
-        # Chỉ tải dữ liệu từ MySQL nếu có kết nối
-        if self.conn and self.cursor:
-            self._tải_dữ_liệu_từ_mysql()
-            self._kiểm_tra_thông_báo()
+        # Ask for MySQL connection
+        if messagebox.askyesno("Kết nối SQL", "Bạn có muốn kết nối với cơ sở dữ liệu MySQL không?"):
+            self._cập_nhật_kết_nối_sql()
 
 
     def _xây_dựng_tab_nhập_liệu(self):
@@ -449,6 +451,35 @@ class Giao_Diện_Người_Dùng:
         btn_xóa.pack(pady=5)
         btn_mẫu = ttk.Button(frame_nhập_liệu, text="Tạo dữ liệu mẫu", command=self._tạo_dữ_liệu_mẫu)
         btn_mẫu.pack(pady=5)
+
+    
+    def _cập_nhật_kết_nối_sql(self):
+        """Mở cửa sổ đăng nhập SQL và cập nhật kết nối"""
+        try:
+            login = SQL_Login()
+            login.wait_window()
+            
+            if login.result:
+                self.conn, self.cursor = login.result
+                self.đồ_thị.conn = self.conn
+                self.đồ_thị.cursor = self.cursor
+                self.nút_tải_dữ_liệu["state"] = "normal"
+                messagebox.showinfo("Thành công", "Đã kết nối thành công với MySQL!")
+                self._tải_dữ_liệu_từ_mysql()
+            else:
+                self.conn = None
+                self.cursor = None
+                self.đồ_thị.conn = None 
+                self.đồ_thị.cursor = None
+                self.nút_tải_dữ_liệu["state"] = "disabled"
+                
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi kết nối: {str(e)}")
+            self.conn = None
+            self.cursor = None
+            self.đồ_thị.conn = None
+            self.đồ_thị.cursor = None
+            self.nút_tải_dữ_liệu["state"] = "disabled"
 
         
 
@@ -874,20 +905,35 @@ class Giao_Diện_Người_Dùng:
                     original_text = original_text.replace(" ↑", "")
                 tree.heading(c, text=original_text)
 
-    def _tính_tiền_lãi(self, số_tiền_gốc, lãi_suất, ngày_bắt_đầu, ngày_kết_thúc):
+    def _tính_tiền_lãi(self, số_tiền_gốc, lãi_suất, ngày_giao_dịch, ngày_kết_thúc):
         """Tính tiền lãi dựa trên số tiền gốc và thời gian"""
-        if not ngày_bắt_đầu:
+        if not ngày_giao_dịch:
             return Decimal('0')
         
-        ngày_bắt_đầu_str = str(ngày_bắt_đầu).split()[0]
-        ngày_bắt_đầu_datetime = time.strptime(ngày_bắt_đầu_str, "%Y-%m-%d")
-        số_ngày = Decimal(str((time.mktime(ngày_kết_thúc) - time.mktime(ngày_bắt_đầu_datetime)) / (24 * 3600)))
-        
-        tiền_lãi = (số_tiền_gốc * 
-                (Decimal(str(lãi_suất or '0')) / Decimal('100')) * 
-                số_ngày) / Decimal('365')
-        
-        return tiền_lãi
+        try:
+            if isinstance(ngày_giao_dịch, str):
+                ngày_giao_dịch_datetime = time.strptime(ngày_giao_dịch, "%Y-%m-%d")
+            else:
+                ngày_giao_dịch_datetime = ngày_giao_dịch
+
+            # Đặt thời gian là 7 ngày trước ngày kết thúc để demo
+            ngày_bắt_đầu = time.localtime(time.time() - 7*24*3600)
+            
+            # Tính số ngày 
+            số_ngày = Decimal(str(
+                (time.mktime(ngày_kết_thúc) - time.mktime(ngày_bắt_đầu)) / (24 * 3600)
+            ))
+            
+            # Tính tiền lãi
+            tiền_lãi = (số_tiền_gốc * 
+                    (Decimal(str(lãi_suất)) / Decimal('100')) * 
+                    số_ngày) / Decimal('365')
+            
+            return max(Decimal('0'), tiền_lãi)
+            
+        except Exception as e:
+            print(f"Lỗi tính lãi: {str(e)}")
+            return Decimal('0')
 
     def _tính_phí_phạt(self, số_tiền_gốc, phí_phạt, ngày_đến_hạn, ngày_kết_thúc):
         """Tính phí phạt nếu quá hạn"""
@@ -909,118 +955,104 @@ class Giao_Diện_Người_Dùng:
                     
         return tiền_phạt, số_ngày_quá_hạn
 
-    def _cập_nhật_tình_trạng_nợ(self):
+    def _cập_nhật_tình_trạng_nợ(self, show_message=True):
+        """Cập nhật tình trạng nợ từ ma trận kề"""
         try:
-            # Lưu lại item đang được chọn
-            selected = None
-            if self.tree_tình_trạng.selection():
-                selected_values = self.tree_tình_trạng.item(self.tree_tình_trạng.selection()[0])['values']
-                selected = (selected_values[0], selected_values[1])  # Lưu người nợ và người cho vay
-
             # Xóa dữ liệu cũ
             for item in self.tree_tình_trạng.get_children():
                 self.tree_tình_trạng.delete(item)
 
-            # Kiểm tra kết nối database
-            if not self.conn or not self.cursor:
-                messagebox.showerror("Lỗi", "Không có kết nối cơ sở dữ liệu!")
-                return
-                    
-            # Lấy ngày hiện tại
+            # Lấy ngày hiện tại và ngày bắt đầu (7 ngày trước để demo)
             hôm_nay = time.strftime("%Y-%m-%d")
             hôm_nay_datetime = time.strptime(hôm_nay, "%Y-%m-%d")
+            ngày_bắt_đầu = time.strftime("%Y-%m-%d", time.localtime(time.time() - 7*24*3600))
 
-            # Query để lấy chi tiết từng khoản nợ và số tiền đã trả
-            self.cursor.execute("""
-            SELECT 
-                d.id,
-                d.from_person,
-                d.to_person,
-                d.amount,
-                d.transaction_date,
-                d.due_date,
-                d.interest_rate,
-                d.late_fee_rate,
-                COALESCE(SUM(p.amount), 0) as total_paid,
-                COALESCE(SUM(p.fee_amount), 0) as fee_paid,
-                COALESCE(SUM(p.interest_amount), 0) as interest_paid,
-                COALESCE(SUM(p.principal_amount), 0) as principal_paid
-            FROM debts d
-            LEFT JOIN payments p ON d.id = p.debt_id
-            GROUP BY d.id, d.from_person, d.to_person, d.amount,
-                    d.transaction_date, d.due_date, d.interest_rate, d.late_fee_rate
-            HAVING (d.amount - COALESCE(SUM(p.amount), 0)) > 0
-            ORDER BY d.due_date ASC, d.from_person, d.to_person
-        """)
-            
-            khoản_nợ = self.cursor.fetchall()
-            
-            if not khoản_nợ:
-                messagebox.showinfo("Thông báo", "Không có khoản nợ nào!")
-                return
-
-            for (debt_id, người_nợ, người_cho_vay, số_tiền, ngày_gd, ngày_đến_hạn, 
-             lãi_suất, phí_phạt, tổng_đã_trả, fee_paid, interest_paid, principal_paid) in khoản_nợ:
+            # Mảng lưu thông tin thanh toán
+            đã_trả_gốc = DynamicArray()
+            đã_trả_lãi = DynamicArray()
+            đã_trả_phí = DynamicArray()
                 
-                # Tính số tiền gốc còn lại cho khoản nợ cụ thể này
-                số_tiền_gốc = Decimal(str(số_tiền))
-                số_tiền_gốc_còn_lại = số_tiền_gốc - Decimal(str(principal_paid))
-                
-                if số_tiền_gốc <= Decimal('0'):
-                    continue
+            # Lấy thông tin thanh toán từ MySQL nếu có kết nối
+            if self.conn and self.cursor:
+                self.cursor.execute("""
+                    SELECT d.from_person, d.to_person,
+                        COALESCE(SUM(p.principal_amount), 0) as paid_principal,
+                        COALESCE(SUM(p.interest_amount), 0) as paid_interest,
+                        COALESCE(SUM(p.fee_amount), 0) as paid_fee
+                    FROM debts d
+                    LEFT JOIN payments p ON d.id = p.debt_id
+                    GROUP BY d.from_person, d.to_person
+                """)
+                for row in self.cursor.fetchall():
+                    đã_trả_gốc.append((row[0], row[1], Decimal(str(row[2]))))
+                    đã_trả_lãi.append((row[0], row[1], Decimal(str(row[3]))))
+                    đã_trả_phí.append((row[0], row[1], Decimal(str(row[4]))))
 
-                # Tính tiền lãi và phí phạt
-                tiền_lãi = self._tính_tiền_lãi(
-                    số_tiền_gốc=số_tiền_gốc_còn_lại,
-                    lãi_suất=lãi_suất,
-                    ngày_bắt_đầu=ngày_gd,
-                    ngày_kết_thúc=hôm_nay_datetime
-                )
+            # Duyệt qua ma_trận_kề để cập nhật tình trạng nợ
+            for i in range(self.đồ_thị.số_đỉnh):
+                for j in range(self.đồ_thị.số_đỉnh):
+                    số_tiền_gốc = self.đồ_thị.ma_trận_kề[i][j]
+                    if số_tiền_gốc > Decimal('0'):
+                        người_nợ = self.đồ_thị.danh_sách_đỉnh[i]
+                        người_cho_vay = self.đồ_thị.danh_sách_đỉnh[j]
 
-                tiền_phạt, số_ngày_quá_hạn = self._tính_phí_phạt(
-                    số_tiền_gốc=số_tiền_gốc_còn_lại,
-                    phí_phạt=phí_phạt,
-                    ngày_đến_hạn=ngày_đến_hạn,
-                    ngày_kết_thúc=hôm_nay_datetime
-                )
+                        # Tìm thông tin từ tree_nợ
+                        ngày_đến_hạn = 'N/A'
+                        lãi_suất = Decimal('0')
+                        phí_phạt = Decimal('0')
+                        
+                        # Duyệt tree_nợ để lấy thông tin chi tiết
+                        for item in self.tree_nợ.get_children():
+                            values = self.tree_nợ.item(item)['values']
+                            if values[0] == người_nợ and values[1] == người_cho_vay:
+                                ngày_đến_hạn = values[3]
+                                lãi_suất = Decimal(str(values[4]).replace("%", ""))
+                                phí_phạt = Decimal(str(values[5]).replace("%", ""))
+                                break
 
-                # Trừ đi số tiền đã thanh toán
-                tiền_lãi_còn_lại = max(Decimal('0'), tiền_lãi - Decimal(str(interest_paid)))
-                tiền_phạt_còn_lại = max(Decimal('0'), tiền_phạt - Decimal(str(fee_paid)))
+                        # Tính tiền lãi
+                        tiền_lãi = self._tính_tiền_lãi(
+                            số_tiền_gốc,
+                            lãi_suất,
+                            ngày_bắt_đầu,
+                            hôm_nay_datetime
+                        )
 
-                # Tính tổng tiền
-                tổng_tiền = số_tiền_gốc_còn_lại + tiền_lãi_còn_lại + tiền_phạt_còn_lại
+                        # Tính phí phạt nếu có ngày đến hạn
+                        tiền_phạt = Decimal('0')
+                        số_ngày_quá_hạn = 0
+                        if ngày_đến_hạn != 'N/A':
+                            tiền_phạt, số_ngày_quá_hạn = self._tính_phí_phạt(
+                                số_tiền_gốc,
+                                phí_phạt,
+                                ngày_đến_hạn,
+                                hôm_nay_datetime
+                            )
 
-                # Thêm vào treeview với đầy đủ thông tin
-                self.tree_tình_trạng.insert("", "end", 
-                    values=(
-                        người_nợ,
-                        người_cho_vay,
-                        format_money(số_tiền_gốc_còn_lại),
-                        ngày_gd.strftime("%Y-%m-%d") if ngày_gd else "N/A",
-                        ngày_đến_hạn.strftime("%Y-%m-%d") if ngày_đến_hạn else "Không có",
-                        f"{Decimal(lãi_suất or 0):.1f}%",
-                        f"{Decimal(phí_phạt or 0):.1f}%",
-                        số_ngày_quá_hạn,
-                        format_money(tiền_lãi_còn_lại),
-                        format_money(tiền_phạt_còn_lại),
-                        format_money(tổng_tiền)
-                    ),
-                    tags=(str(debt_id),)  # Lưu debt_id trong tags để dùng khi thanh toán
-                )
-            # Sau khi thêm tất cả items mới, tìm và select lại item cũ
-            if selected:
-                for item in self.tree_tình_trạng.get_children():
-                    values = self.tree_tình_trạng.item(item)['values']
-                    if (values[0], values[1]) == selected:
-                        self.tree_tình_trạng.selection_set(item)
-                        self.tree_tình_trạng.see(item)  # Đảm bảo item được hiển thị
-                        break
+                        # Tính tổng tiền phải trả
+                        tổng_tiền = số_tiền_gốc + tiền_lãi + tiền_phạt
 
-            messagebox.showinfo("Thành công", "Đã cập nhật tình trạng nợ!")
-                
-        except mysql.connector.Error as err:
-            messagebox.showerror("Lỗi", f"Lỗi cập nhật: {err}")
+                        # Thêm vào treeview
+                        self.tree_tình_trạng.insert("", "end", 
+                            values=(
+                                người_nợ,
+                                người_cho_vay,
+                                format_money(số_tiền_gốc),
+                                ngày_bắt_đầu,
+                                ngày_đến_hạn,
+                                f"{lãi_suất}%",
+                                f"{phí_phạt}%",
+                                số_ngày_quá_hạn,
+                                format_money(tiền_lãi),
+                                format_money(tiền_phạt),
+                                format_money(tổng_tiền)
+                            ),
+                            tags=(str(i*self.đồ_thị.số_đỉnh + j),)
+                        )
+
+            if show_message:
+                messagebox.showinfo("Thành công", "Đã cập nhật tình trạng nợ!")
+
         except Exception as e:
             messagebox.showerror("Lỗi", f"Lỗi không xác định: {str(e)}")
 
@@ -1195,80 +1227,36 @@ class Giao_Diện_Người_Dùng:
             messagebox.showerror("Lỗi", "Cần ít nhất 2 người dùng để tối ưu hóa dòng tiền!")
             return
 
-        # Lấy danh sách nợ từ CSDL với thông tin về lãi và phí phạt
-        self.cursor.execute("""
-            SELECT from_person, to_person, amount, transaction_date, due_date, 
-                interest_rate, late_fee_rate 
-            FROM debts
-        """)
-        danh_sách_nợ_gốc = self.cursor.fetchall()
+        # Lấy danh sách nợ từ đồ thị thay vì từ MySQL
+        danh_sách_nợ = DynamicArray()
+        
+        # Duyệt qua ma_trận_kề để lấy các khoản nợ
+        for i in range(self.đồ_thị.số_đỉnh):
+            for j in range(self.đồ_thị.số_đỉnh):
+                if self.đồ_thị.ma_trận_kề[i][j] > Decimal('0'):
+                    người_nợ = self.đồ_thị.danh_sách_đỉnh[i]
+                    người_cho_vay = self.đồ_thị.danh_sách_đỉnh[j]
+                    số_tiền = self.đồ_thị.ma_trận_kề[i][j]
+                    danh_sách_nợ.append((người_nợ, người_cho_vay, số_tiền))
 
-        if not danh_sách_nợ_gốc:
+        if not danh_sách_nợ.size:
             messagebox.showerror("Lỗi", "Không có khoản nợ nào để tối ưu hóa!")
             return
 
-        # Tính toán tổng số tiền (gốc + lãi + phạt) cho mỗi khoản nợ
-        danh_sách_nợ = DynamicArray()
-        hôm_nay = time.strftime("%Y-%m-%d")
-        hôm_nay_datetime = time.strptime(hôm_nay, "%Y-%m-%d")
-        
-        for người_nợ, người_cho_vay, số_tiền_gốc, ngày_giao_dịch, ngày_đến_hạn, lãi_suất, phí_phạt in danh_sách_nợ_gốc:
-            # Chuyển đổi các giá trị Decimal thành float
-            số_tiền_gốc = Decimal(str(số_tiền_gốc))
-            lãi_suất = Decimal(str(lãi_suất)) if lãi_suất else Decimal('0')
-            phí_phạt = Decimal(str(phí_phạt)) if phí_phạt else Decimal('0')
-            
-            tổng_tiền = số_tiền_gốc
-
-            
-            
-            # Tính lãi (nếu có)
-            if ngày_giao_dịch and lãi_suất:
-                # Chuẩn hóa định dạng ngày tháng (loại bỏ phần thời gian)
-                ngày_giao_dịch_str = str(ngày_giao_dịch).split()[0]
-                ngày_giao_dịch_datetime = time.strptime(ngày_giao_dịch_str, "%Y-%m-%d")
-                số_ngày = max(0, (time.mktime(hôm_nay_datetime) - time.mktime(ngày_giao_dịch_datetime)) / (24 * 3600))
-                tiền_lãi = self._tính_tiền_lãi(
-                    số_tiền_gốc=số_tiền_gốc,
-                    lãi_suất=lãi_suất,
-                    ngày_bắt_đầu=ngày_giao_dịch,
-                    ngày_kết_thúc=hôm_nay_datetime
-                )
-                tổng_tiền += tiền_lãi
-            
-            # Tính phí phạt nếu quá hạn
-            if ngày_đến_hạn and phí_phạt:
-                tiền_phạt, số_ngày_quá_hạn = self._tính_phí_phạt(
-                    số_tiền_gốc=số_tiền_gốc,
-                    phí_phạt=phí_phạt,
-                    ngày_đến_hạn=ngày_đến_hạn,
-                    ngày_kết_thúc=hôm_nay_datetime
-                )
-                tổng_tiền += tiền_phạt
-                # Thêm khoản nợ với tổng số tiền đã tính vào danh sách
-                
-            danh_sách_nợ.append((người_nợ, người_cho_vay, tổng_tiền))
-                
-
-            
-        
-        # Phần còn lại của hàm giữ nguyên
-        đồ_thị_tạm = Đồ_Thị(self.conn, self.cursor)
+        # Thực hiện tối ưu hóa
+        bắt_đầu = time.time()
+        đồ_thị_tạm = Đồ_Thị()
         for tên in self.đồ_thị.danh_sách_đỉnh:
             đồ_thị_tạm.thêm_đỉnh(tên)
         
         for nguồn, đích, giá_trị in danh_sách_nợ:
             đồ_thị_tạm.thêm_cạnh(nguồn, đích, giá_trị, lưu_vào_db=False)
         
-        # Bắt đầu tối ưu hóa
-        bắt_đầu = time.time()
         tối_ưu = Tối_Ưu_Hóa_Dòng_Tiền(đồ_thị_tạm)
-        start_time = time.perf_counter()
         giao_dịch_tối_ưu = tối_ưu.tối_ưu_hóa()
-        end_time = time.perf_counter()
         kết_thúc = time.time()
         thời_gian = (kết_thúc - bắt_đầu) * 1000
-        
+
         # Hiển thị kết quả
         self._hiển_thị_kết_quả(giao_dịch_tối_ưu, tối_ưu.đánh_giá_hiệu_năng(giao_dịch_tối_ưu), thời_gian)
         self._vẽ_đồ_thị(danh_sách_nợ, giao_dịch_tối_ưu)
@@ -1491,10 +1479,7 @@ class Giao_Diện_Người_Dùng:
         if not messagebox.askyesno("Xác nhận", "Bạn có muốn tạo dữ liệu mẫu để thử nghiệm?"):
             return
             
-        # Kiểm tra kết nối database
-        if not self.conn or not self.cursor:
-            messagebox.showerror("Lỗi", "Không có kết nối cơ sở dữ liệu! Vui lòng kết nối MySQL trước.")
-            return
+
         
         try:
             # Xóa dữ liệu cũ và đồng bộ kết nối
@@ -1521,26 +1506,40 @@ class Giao_Diện_Người_Dùng:
             ]
             
             # Chèn dữ liệu vào MySQL và cập nhật giao diện
-            for nguồn, đích, giá_trị, ngày_giao_dịch, hạn, lãi, phí in khoản_nợ_mẫu:
-                self.cursor.execute(
-                    """
-                    INSERT INTO debts (from_person, to_person, amount, transaction_date, due_date, interest_rate, late_fee_rate)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (nguồn, đích, giá_trị, ngày_giao_dịch, hạn, lãi, phí)
-                )
-                self.conn.commit()
+            for nguồn, đích, giá_trị, ngày_gd, hạn, lãi, phí in khoản_nợ_mẫu:
+                # Thêm vào đồ thị
                 self.đồ_thị.thêm_cạnh(nguồn, đích, giá_trị, lưu_vào_db=False)
-                self.tree_nợ.insert("", "end", values=(nguồn, đích, f"{giá_trị:.2f}", hạn, f"{lãi}%", f"{phí}%"))
-            
-            # Cập nhật combobox và thông báo
+                
+                # Thêm vào giao diện
+                self.tree_nợ.insert("", "end", values=(
+                    nguồn, đích, f"{giá_trị:.2f}", 
+                    hạn, f"{lãi}%", f"{phí}%"
+                ))
+
+                # Nếu có kết nối MySQL thì lưu vào database
+                if self.conn and self.cursor:
+                    self.cursor.execute(
+                        """
+                        INSERT INTO debts (from_person, to_person, amount, 
+                                        transaction_date, due_date, 
+                                        interest_rate, late_fee_rate)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (nguồn, đích, giá_trị, ngày_gd, hạn, lãi, phí)
+                    )
+                    self.conn.commit()
+
+            # Cập nhật combobox và giao diện
             self._cập_nhật_combobox()
-            messagebox.showinfo("Thành công", "Đã tạo dữ liệu mẫu đầy đủ!")
-        
-        except mysql.connector.Error as err:
-            messagebox.showerror("Lỗi", f"Không thể tạo dữ liệu mẫu: {err}")
+            if self.conn and self.cursor:
+                self._cập_nhật_tình_trạng_nợ()
+                
+            messagebox.showinfo("Thành công", "Đã tạo dữ liệu mẫu!")
+
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Lỗi không xác định: {str(e)}")
+            if self.conn:
+                self.conn.rollback()
+            messagebox.showerror("Lỗi", f"Lỗi tạo dữ liệu mẫu: {str(e)}")
 
     def _kiểm_tra_thông_báo(self):
         """Hiển thị thông báo về các khoản nợ sắp đến hạn và các khoản nợ đã quá hạn"""
@@ -1655,21 +1654,24 @@ class Giao_Diện_Người_Dùng:
             messagebox.showerror("Lỗi", "Vui lòng chọn một khoản nợ để thanh toán!")
             return
 
-        # Lấy thông tin từ dòng được chọn
-        values = self.tree_tình_trạng.item(selected_item, 'values')
-        debt_id = self.tree_tình_trạng.item(selected_item)['tags'][0]
-        người_nợ = values[0]
-        người_cho_vay = values[1]
-        số_tiền_gốc_còn_lại = Decimal(str(values[2]).replace(",", ""))
-        tiền_lãi = Decimal(str(values[8]).replace(",", ""))
-        tiền_phạt = Decimal(str(values[9]).replace(",", "")) 
-        tổng_tiền_hiện_tại = Decimal(str(values[10]).replace(",", ""))
-
         try:
+            # Lấy thông tin khoản nợ được chọn
+            values = self.tree_tình_trạng.item(selected_item, 'values')
+            người_nợ = values[0]
+            người_cho_vay = values[1]
+            số_tiền_gốc = Decimal(str(values[2]).replace(",", ""))
+            ngày_giao_dịch = values[3]
+            ngày_đến_hạn = values[4]
+            lãi_suất = Decimal(str(values[5]).replace("%", ""))
+            phí_phạt = Decimal(str(values[6]).replace("%", ""))
+            tiền_lãi = Decimal(str(values[8]).replace(",", ""))
+            tiền_phạt = Decimal(str(values[9]).replace(",", ""))
+            tổng_tiền = Decimal(str(values[10]).replace(",", ""))
+
             # Nhập số tiền thanh toán
             số_tiền_thanh_toán_str = simpledialog.askstring(
                 "Thanh toán", 
-                f"Nhập số tiền thanh toán (tối đa {format_money(tổng_tiền_hiện_tại)}):"
+                f"Nhập số tiền thanh toán (tối đa {format_money(tổng_tiền)}):"
             )
             if số_tiền_thanh_toán_str is None:
                 return
@@ -1677,65 +1679,125 @@ class Giao_Diện_Người_Dùng:
             số_tiền_thanh_toán = Decimal(số_tiền_thanh_toán_str.replace(",", ""))
             if số_tiền_thanh_toán <= Decimal('0'):
                 raise ValueError("Số tiền phải lớn hơn 0")
-            if số_tiền_thanh_toán > tổng_tiền_hiện_tại:
-                raise ValueError(f"Số tiền không được vượt quá {format_money(tổng_tiền_hiện_tại)}")
+            if số_tiền_thanh_toán > tổng_tiền:
+                raise ValueError(f"Số tiền không được vượt quá {format_money(tổng_tiền)}")
 
+            # Phân bổ thanh toán theo thứ tự: phí phạt -> lãi -> gốc
             số_tiền_còn_lại = số_tiền_thanh_toán
             số_tiền_trừ_phí_phạt = Decimal('0')
-            số_tiền_trừ_lãi = Decimal('0')
+            số_tiền_trừ_lãi = Decimal('0') 
             số_tiền_trừ_gốc = Decimal('0')
 
-            # 1. Trừ phí phạt trước (nếu có)
-            if tiền_phạt > Decimal('0') and số_tiền_còn_lại > Decimal('0'):
+            # 1. Trừ phí phạt trước
+            if tiền_phạt > Decimal('0'):
                 số_tiền_trừ_phí_phạt = min(số_tiền_còn_lại, tiền_phạt)
                 số_tiền_còn_lại -= số_tiền_trừ_phí_phạt
 
-            # 2. Trừ lãi (nếu còn tiền và có lãi)
+            # 2. Trừ tiền lãi 
             if tiền_lãi > Decimal('0') and số_tiền_còn_lại > Decimal('0'):
                 số_tiền_trừ_lãi = min(số_tiền_còn_lại, tiền_lãi)
                 số_tiền_còn_lại -= số_tiền_trừ_lãi
 
-            # 3. Trừ gốc (nếu còn tiền)
+            # 3. Trừ tiền gốc
             if số_tiền_còn_lại > Decimal('0'):
-                số_tiền_trừ_gốc = min(số_tiền_còn_lại, số_tiền_gốc_còn_lại)
+                số_tiền_trừ_gốc = min(số_tiền_còn_lại, số_tiền_gốc)
 
-            # Ghi nhận chi tiết thanh toán vào CSDL
-            self.cursor.execute("""
-                INSERT INTO payments 
-                (debt_id, amount, payment_date, fee_amount, interest_amount, principal_amount) 
-                VALUES (%s, %s, NOW(), %s, %s, %s)
-            """, (
-                debt_id, 
-                str(số_tiền_thanh_toán),
-                str(số_tiền_trừ_phí_phạt),
-                str(số_tiền_trừ_lãi),
-                str(số_tiền_trừ_gốc)
-            ))
+            # Cập nhật cơ sở dữ liệu nếu có kết nối
+            if self.conn and self.cursor:
+                self.cursor.execute("""
+                    SELECT id FROM debts 
+                    WHERE from_person = %s AND to_person = %s
+                    AND amount >= %s
+                    ORDER BY transaction_date DESC 
+                    LIMIT 1
+                """, (người_nợ, người_cho_vay, số_tiền_gốc))
+                
+                result = self.cursor.fetchone()
+                if not result:
+                    raise ValueError("Không tìm thấy khoản nợ trong cơ sở dữ liệu")
+                debt_id = result[0]
 
-            # Cập nhật ma_trận_kề chỉ với phần tiền gốc
+                # Ghi nhận thanh toán
+                self.cursor.execute("""
+                    INSERT INTO payments 
+                    (debt_id, amount, payment_date, fee_amount, interest_amount, principal_amount)
+                    VALUES (%s, %s, NOW(), %s, %s, %s)
+                """, (
+                    debt_id,
+                    str(số_tiền_thanh_toán),
+                    str(số_tiền_trừ_phí_phạt),
+                    str(số_tiền_trừ_lãi),
+                    str(số_tiền_trừ_gốc)
+                ))
+                self.conn.commit()
+
+            # Cập nhật ma trận kề
             i = self.đồ_thị.danh_sách_đỉnh.index(người_nợ)
             j = self.đồ_thị.danh_sách_đỉnh.index(người_cho_vay)
-            self.đồ_thị.ma_trận_kề[i][j] = max(Decimal('0'), số_tiền_gốc_còn_lại - số_tiền_trừ_gốc)
+            số_tiền_gốc_mới = max(Decimal('0'), số_tiền_gốc - số_tiền_trừ_gốc)
+            tiền_lãi_mới = max(Decimal('0'), tiền_lãi - số_tiền_trừ_lãi)
+            tiền_phạt_mới = max(Decimal('0'), tiền_phạt - số_tiền_trừ_phí_phạt)
+            
+            # Kiểm tra nếu đã thanh toán hết
+            if (số_tiền_gốc_mới == Decimal('0') and 
+                tiền_lãi_mới == Decimal('0') and 
+                tiền_phạt_mới == Decimal('0')):
+                
+                # Xóa khỏi ma trận kề
+                self.đồ_thị.ma_trận_kề[i][j] = Decimal('0')
+                
+                # Xóa khỏi tree_tình_trạng
+                self.tree_tình_trạng.delete(selected_item[0])
+                
+                # Xóa khỏi tree_nợ
+                for item in self.tree_nợ.get_children():
+                    values = self.tree_nợ.item(item)['values']
+                    if values[0] == người_nợ and values[1] == người_cho_vay:
+                        self.tree_nợ.delete(item)
+                        break
+                
+                messagebox.showinfo("Thành công", 
+                    f"Đã thanh toán hết khoản nợ!\n"
+                    f"Chi tiết thanh toán cuối cùng:\n"
+                    f"- Phí phạt: {format_money(số_tiền_trừ_phí_phạt)}\n"
+                    f"- Lãi: {format_money(số_tiền_trừ_lãi)}\n"
+                    f"- Gốc: {format_money(số_tiền_trừ_gốc)}"
+                )
+            else:
+                # Cập nhật ma trận kề với số tiền gốc mới
+                self.đồ_thị.ma_trận_kề[i][j] = số_tiền_gốc_mới
 
-            self.conn.commit()
+                # Update displays
+                self.tree_tình_trạng.set(selected_item[0], column=2, value=format_money(số_tiền_gốc_mới))
+                self.tree_tình_trạng.set(selected_item[0], column=8, value=format_money(tiền_lãi_mới))
+                self.tree_tình_trạng.set(selected_item[0], column=9, value=format_money(tiền_phạt_mới))
+                self.tree_tình_trạng.set(selected_item[0], column=10, 
+                    value=format_money(số_tiền_gốc_mới + tiền_lãi_mới + tiền_phạt_mới))
 
-            # Cập nhật giao diện
-            self._cập_nhật_tình_trạng_nợ()
-            messagebox.showinfo("Thành công", 
-                f"Đã ghi nhận thanh toán {format_money(số_tiền_thanh_toán)}!\n"
-                f"Chi tiết:\n"
-                f"- Phí phạt: {format_money(số_tiền_trừ_phí_phạt)} ({format_money(tiền_phạt - số_tiền_trừ_phí_phạt)} còn lại)\n"
-                f"- Lãi: {format_money(số_tiền_trừ_lãi)} ({format_money(tiền_lãi - số_tiền_trừ_lãi)} còn lại)\n"
-                f"- Gốc: {format_money(số_tiền_trừ_gốc)} ({format_money(số_tiền_gốc_còn_lại - số_tiền_trừ_gốc)} còn lại)"
-            )
+                # Cập nhật tree_nợ
+                for item in self.tree_nợ.get_children():
+                    values = self.tree_nợ.item(item)['values']  
+                    if values[0] == người_nợ and values[1] == người_cho_vay:
+                        self.tree_nợ.set(item, column=2, value=format_money(số_tiền_gốc_mới))
+                        break
 
-        except mysql.connector.Error as err:
-            self.conn.rollback()
-            messagebox.showerror("Lỗi", f"Không thể ghi nhận thanh toán: {err}")
+                messagebox.showinfo("Thành công", 
+                    f"Đã ghi nhận thanh toán {format_money(số_tiền_thanh_toán)}!\n"
+                    f"Chi tiết:\n"
+                    f"- Phí phạt: {format_money(số_tiền_trừ_phí_phạt)} ({format_money(tiền_phạt_mới)} còn lại)\n"
+                    f"- Lãi: {format_money(số_tiền_trừ_lãi)} ({format_money(tiền_lãi_mới)} còn lại)\n"
+                    f"- Gốc: {format_money(số_tiền_trừ_gốc)} ({format_money(số_tiền_gốc_mới)} còn lại)"
+                )
+
         except ValueError as e:
             messagebox.showerror("Lỗi", str(e))
+        except mysql.connector.Error as err:
+            if self.conn:
+                self.conn.rollback()
+            messagebox.showerror("Lỗi MySQL", f"Lỗi cập nhật cơ sở dữ liệu: {err}")
         except Exception as e:
-            self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
             messagebox.showerror("Lỗi", f"Lỗi không xác định: {str(e)}")
 
     def _xóa_dữ_liệu(self):
